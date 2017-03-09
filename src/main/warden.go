@@ -6,7 +6,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
-	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"io/ioutil"
@@ -22,25 +21,39 @@ import (
 )
 
 type configType struct {
-	Debug bool
 	Port int
 	ServerCertFile string
 	ServerKeyFile string
+	ServerLogFile string
 	SignersDir string
 	AllowedKeys []string
 }
 
-var config configType = configType{
-	false,
+var cfg configType = configType{
 	9000,
 	"./server.crt",
 	"./server.key",
+	"./server.log",
 	"./signers",
 	[]string{},
 }
 
 func initConfig() {
-	
+	config.Load(&cfg)
+
+	if cfg.ServerLogFile != "" {
+		log.SetLogFile(cfg.ServerLogFile)
+	}
+	if config.Debug {
+		log.SetLogLevel(log.LEVEL_DEBUG)
+	}
+}
+
+func recoverAndError(writer http.ResponseWriter) {
+	if r := recover(); r != nil {
+		log.Warn("warden", "panic in handler", r)
+		httputil.SendJSON(writer, http.StatusInternalServerError, struct{}{})
+	}
 }
 
 //
@@ -54,14 +67,14 @@ type signer struct {
 }
 
 func getSignersDir() *os.File {
-	fi, err := os.Stat(config.SignersDir)
+	fi, err := os.Stat(cfg.SignersDir)
 	if err != nil {
 		panic(err)
 	}
 	if !fi.IsDir() {
-		panic(errors.New("'"+config.SignersDir+"' is not a directory"))
+		panic(errors.New("'"+cfg.SignersDir+"' is not a directory"))
 	}
-	f, err := os.Open(config.SignersDir)
+	f, err := os.Open(cfg.SignersDir)
 	if err != nil {
 		panic(err)
 	}
@@ -124,7 +137,7 @@ func addSigner(signer *signer, pool *x509.CertPool) error {
 
 	sum := sha256.Sum256([]byte(signer.subject + signer.serial))
 	hash := hex.EncodeToString(sum[:])
-	signer.path = filepath.Join(config.SignersDir, hash)
+	signer.path = filepath.Join(cfg.SignersDir, hash)
 
 	err = ioutil.WriteFile(signer.path, signer.pem, 0600)
 	if err != nil { return err }
@@ -163,6 +176,14 @@ func deleteSigner(s *signer, pool*x509.CertPool) error {
 }
 
 func main() {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Error("warden", "panic on startup", r)
+		}
+	}()
+
+	initConfig()
+
 	clientRoot := x509.NewCertPool()
 
 	http.HandleFunc("/signers", func(writer http.ResponseWriter, req *http.Request) {
@@ -179,6 +200,8 @@ func main() {
 		//   O: None
 		//   200: deleted; 404: specified PEM not found; 400 (bad request): bogus input
 		// Non-GET/PUT/DELETE: 405 (bad method)
+		defer recoverAndError(writer)
+
 		switch req.Method {
 		case "GET":
 			buf := bytes.Buffer{}
@@ -222,6 +245,7 @@ func main() {
 		//   O: {AvailableKeys: [""]}
 		//   200: success
 		// Non-GET: 405 (bad method)
+		defer recoverAndError(writer)
 		httputil.SendJSON(writer, http.StatusOK, struct{}{})
 	})
 
@@ -231,6 +255,7 @@ func main() {
 		//   O: application/octet-stream
 		//   200: signed data; 404: unrecognized fingerprint; 400: missing body
 		// Non-POST: 405 (bad method)
+		defer recoverAndError(writer)
 		httputil.SendJSON(writer, http.StatusOK, struct{}{})
 	})
 
@@ -254,10 +279,10 @@ func main() {
 	// now make an HTTP server using the self-signed-ready tls.Config
 	//tlsConfig.BuildNameToCertificate()
 	server := &http.Server{
-		Addr:      ":" + strconv.Itoa(config.Port),
+		Addr:      ":" + strconv.Itoa(cfg.Port),
 		TLSConfig: tlsConfig,
 	}
 
-	log.Status("warden", "starting HTTP on port "+strconv.Itoa(config.Port))
-	log.Error("warden", "shutting down; error?", server.ListenAndServeTLS(config.ServerCertFile, config.ServerKeyFile))
+	log.Status("warden", "starting HTTP on port "+strconv.Itoa(cfg.Port))
+	log.Error("warden", "shutting down; error?", server.ListenAndServeTLS(cfg.ServerCertFile, cfg.ServerKeyFile))
 }
