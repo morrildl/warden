@@ -1,3 +1,9 @@
-[submodule "pg"]
-	path = src/main/vendor/playground
-	url = /pg/src/playground
+[submodule "src/main/vendor/playground/log"]
+	path = src/main/vendor/playground/log
+	url = ssh://code.playground.global:29418/studio/playground/log
+[submodule "src/main/vendor/playground/config"]
+	path = src/main/vendor/playground/config
+	url = ssh://code.playground.global:29418/studio/playground/config
+[submodule "src/main/vendor/playground/httputil"]
+	path = src/main/vendor/playground/httputil
+	url = ssh://code.playground.global:29418/studio/playground/httputil

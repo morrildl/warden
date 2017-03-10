@@ -4,3 +4,5 @@
 /*.crt
 /*.log
 /*.pem
+certs/
+signers/

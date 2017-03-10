@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 
@@ -21,16 +22,18 @@ import (
 )
 
 type configType struct {
-	Port int
+	Port           int
+	Debug          bool
 	ServerCertFile string
-	ServerKeyFile string
-	ServerLogFile string
-	SignersDir string
-	AllowedKeys []string
+	ServerKeyFile  string
+	ServerLogFile  string
+	SignersDir     string
+	AllowedKeys    []string
 }
 
 var cfg configType = configType{
 	9000,
+	false,
 	"./server.crt",
 	"./server.key",
 	"./server.log",
@@ -44,7 +47,7 @@ func initConfig() {
 	if cfg.ServerLogFile != "" {
 		log.SetLogFile(cfg.ServerLogFile)
 	}
-	if config.Debug {
+	if config.Debug || cfg.Debug {
 		log.SetLogLevel(log.LEVEL_DEBUG)
 	}
 }
@@ -60,19 +63,22 @@ func recoverAndError(writer http.ResponseWriter) {
 // Client (authorized signer) cert functions
 //
 type signer struct {
-	subject string
-	serial string
 	path string
-	pem []byte
+	cert *x509.Certificate
+	pem  []byte
 }
 
-func getSignersDir() *os.File {
-	fi, err := os.Stat(cfg.SignersDir)
+type SignerManager struct {
+	SignersDir string
+}
+
+func (sm *SignerManager) GetSignersDir() *os.File {
+	fi, err := os.Stat(sm.SignersDir)
 	if err != nil {
 		panic(err)
 	}
 	if !fi.IsDir() {
-		panic(errors.New("'"+cfg.SignersDir+"' is not a directory"))
+		panic(errors.New("'" + cfg.SignersDir + "' is not a directory"))
 	}
 	f, err := os.Open(cfg.SignersDir)
 	if err != nil {
@@ -81,12 +87,16 @@ func getSignersDir() *os.File {
 	return f
 }
 
-func getSigners() []signer {
-	dir := getSignersDir()
+func (sm *SignerManager) GetSigners() []signer {
+	dir := sm.GetSignersDir()
 	defer dir.Close()
 
 	files, err := dir.Readdir(0)
-	if err != nil { panic(err) }
+	if err != nil {
+		panic(err)
+	}
+
+	log.Debug("SignerManager.GetSigners", "lulz", files)
 
 	ret := []signer{}
 	for _, fi := range files {
@@ -95,21 +105,20 @@ func getSigners() []signer {
 			continue
 		}
 
-		s := signer{}
+		path := filepath.Join(dir.Name(), base)
+		pemBytes, err := ioutil.ReadFile(path)
+		if err != nil {
+			panic(err)
+		}
 
-		s.path = filepath.Join(dir.Name(), base)
-		s.pem, err = ioutil.ReadFile(s.path)
-		if err != nil { panic(err) }
-
-		block, _ := pem.Decode(s.pem) // only parse first block in file
+		block, _ := pem.Decode(pemBytes) // only parse first block in file
 		certs, err := x509.ParseCertificates(block.Bytes)
-		if err != nil { panic(err) }
+		if err != nil {
+			panic(err)
+		}
 
 		for _, cert := range certs {
-			s.subject = cert.Subject.CommonName
-			s.serial = cert.Subject.SerialNumber
-			s.pem = block.Bytes
-			ret = append(ret, s)
+			ret = append(ret, signer{path, cert, pemBytes})
 		}
 	}
 
@@ -119,47 +128,53 @@ func getSigners() []signer {
 	return ret
 }
 
-func addSigner(signer *signer, pool *x509.CertPool) error {
-	block, _ := pem.Decode(signer.pem) // only parse first block in file
+func (sm *SignerManager) AddSigner(pemBytes []byte) error {
+	block, _ := pem.Decode(pemBytes) // only parse first block in file
 	certs, err := x509.ParseCertificates(block.Bytes)
 	if err != nil || len(certs) < 1 {
 		return errors.New("invalid PEM block provided")
 	}
-	signer.subject = certs[0].Subject.CommonName
-	signer.serial = certs[0].Subject.SerialNumber
+	if len(certs) > 1 {
+		return errors.New("multiple certs provided")
+	}
+	s := signer{cert: certs[0]}
 
-	existing := getSigners()
+	existing := sm.GetSigners()
 	for _, e := range existing {
-		if e.subject == signer.subject && e.serial == signer.serial {
+		if sm.Same(s.cert, e.cert) {
 			return errors.New("signer already exists")
 		}
 	}
 
-	sum := sha256.Sum256([]byte(signer.subject + signer.serial))
+	sum := sha256.Sum256([]byte(s.cert.Subject.CommonName + s.cert.Subject.SerialNumber))
 	hash := hex.EncodeToString(sum[:])
-	signer.path = filepath.Join(cfg.SignersDir, hash)
+	s.path = filepath.Join(sm.SignersDir, hash+".pem")
 
-	err = ioutil.WriteFile(signer.path, signer.pem, 0600)
-	if err != nil { return err }
+	log.Debug("SignerManager.AddSigner", s.cert.Subject.CommonName, s.cert.Subject.SerialNumber)
 
-	pool.AppendCertsFromPEM(signer.pem)
+	err = ioutil.WriteFile(s.path, pemBytes, 0600)
+	if err != nil {
+		return err
+	}
 
 	return nil
 }
 
-func deleteSigner(s *signer, pool*x509.CertPool) error {
-	block, _ := pem.Decode(s.pem) // only parse first block in file
+func (sm *SignerManager) DeleteSigner(pemBytes []byte) error {
+	block, _ := pem.Decode(pemBytes) // only parse first block in file
 	certs, err := x509.ParseCertificates(block.Bytes)
 	if err != nil || len(certs) < 1 {
 		return errors.New("invalid PEM block provided")
 	}
-	s.subject = certs[0].Subject.CommonName
-	s.serial = certs[0].Subject.SerialNumber
+	if len(certs) > 1 {
+		return errors.New("multiple certs provided")
+	}
+	client := signer{cert: certs[0]}
 
 	var victim *signer = nil
-	existing := getSigners()
+	existing := sm.GetSigners()
 	for _, e := range existing {
-		if e.subject == s.subject && e.serial == s.serial {
+		if sm.Same(client.cert, e.cert) {
 			victim = &e
 			break
 		}
@@ -169,22 +184,92 @@ func deleteSigner(s *signer, pool*x509.CertPool) error {
 	}
 
 	err = os.Remove(victim.path)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 
-	// TODO: update certpool
 	return nil
 }
 
-func main() {
-	defer func() {
-		if r := recover(); r != nil {
-			log.Error("warden", "panic on startup", r)
-		}
-	}()
+func (sm *SignerManager) VerifyPeerCallback(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
+	//
+	// Both client and server are expected to verify each others' specific certs. These are
+	// self-signed certs, not CA-issued; we don't trust the usual PKIX chain. Here in the server, we
+	// need to support multiple signer clients, so we load their certs out of a directory.
+	//
 
+	log.Debug("SignerManager.VerifyPeerCallback", "called")
+
+	if len(rawCerts) != 1 {
+		return errors.New("expecting only a single cert")
+	}
+
+	certs, err := x509.ParseCertificates(rawCerts[0])
+	if err != nil || len(certs) < 1 {
+		return errors.New("invalid PEM block provided")
+	}
+	if len(certs) > 1 {
+		return errors.New("multiple certs provided")
+	}
+	client := certs[0]
+
+	log.Debug("SignerManager.VerifyPeerCallback", "cert stuff", client.Subject.CommonName)
+
+	for _, s := range sm.GetSigners() {
+		if sm.Same(client, s.cert) {
+			return nil
+		}
+	}
+
+	return errors.New("unknown certificate")
+}
+
+func (sm *SignerManager) Same(left *x509.Certificate, right *x509.Certificate) bool {
+	if !reflect.DeepEqual(left.Subject, right.Subject) {
+		log.Debug("SignerManager.Same", "mismatched subjects", left.Subject.CommonName, right.Subject.CommonName)
+		return false
+	}
+
+	if left.SerialNumber.Cmp(right.SerialNumber) != 0 {
+		log.Debug("SignerManager.Same", "mismatched serial numbers", left.Subject.CommonName, right.Subject.CommonName)
+		return false
+	}
+
+	if left.SignatureAlgorithm != right.SignatureAlgorithm {
+		log.Debug("SignerManager.Same", "sig algorithm mismatch", left.Subject.CommonName, right.Subject.CommonName)
+		return false
+	}
+
+	if !bytes.Equal(left.Signature, right.Signature) {
+		log.Debug("SignerManager.Same", "signature mismatch", left.Subject.CommonName, right.Subject.CommonName)
+		return false
+	}
+
+	if left.PublicKeyAlgorithm != right.PublicKeyAlgorithm {
+		log.Debug("SignerManager.Same", "pubkey algorithm mismatch", left.Subject.CommonName, right.Subject.CommonName)
+		return false
+	}
+
+	if !reflect.DeepEqual(left.PublicKey, right.PublicKey) {
+		log.Debug("SignerManager.Same", "pubkey algorithm mismatch", left.Subject.CommonName, right.Subject.CommonName)
+		return false
+	}
+
+	return true
+}
+
+func main() {
 	initConfig()
 
-	clientRoot := x509.NewCertPool()
+	if !cfg.Debug {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Error("warden", "panic on startup", r)
+			}
+		}()
+	}
+
+	sm := &SignerManager{cfg.SignersDir}
 
 	http.HandleFunc("/signers", func(writer http.ResponseWriter, req *http.Request) {
 		// GET /signers -- fetch a PEM file containing all authorized PEM public keys
@@ -205,30 +290,32 @@ func main() {
 		switch req.Method {
 		case "GET":
 			buf := bytes.Buffer{}
-			for _, s := range getSigners() {
+			for _, s := range sm.GetSigners() {
 				buf.Write(s.pem)
 			}
 			httputil.Send(writer, http.StatusOK, "application/x-pem-file", buf.Bytes())
 		case "PUT":
+			log.Debug("main/signers", "puticules")
 			body, err := ioutil.ReadAll(req.Body)
 			if err != nil {
 				httputil.SendJSON(writer, http.StatusBadRequest, struct{}{})
 				return
 			}
-			err = addSigner(&signer{pem: body}, clientRoot)
+			log.Debug("main/signers", "read")
+			err = sm.AddSigner(body)
 			if err != nil {
 				httputil.SendJSON(writer, http.StatusConflict, struct{}{})
 				return
 			}
+			log.Debug("main/signers", "disk")
 			httputil.SendJSON(writer, http.StatusOK, struct{}{})
 		case "DELETE":
-			body := struct{Subject string; Serial string}{}
-			err := httputil.PopulateFromBody(&body, req)
+			body, err := ioutil.ReadAll(req.Body)
 			if err != nil {
 				httputil.SendJSON(writer, http.StatusBadRequest, struct{}{})
 				return
 			}
-			err = deleteSigner(&signer{subject: body.Subject, serial: body.Serial}, clientRoot)
+			err = sm.DeleteSigner(body)
 			if err != nil {
 				httputil.SendJSON(writer, http.StatusBadRequest, struct{}{})
 				return
@@ -259,28 +346,14 @@ func main() {
 		httputil.SendJSON(writer, http.StatusOK, struct{}{})
 	})
 
-	//
-	// Both client and server are expected to verify each others' specific certs. These are
-	// self-signed certs, not CA-issued; we don't trust the usual PKIX chain. Here in the server, we
-	// need to support multiple signer clients, so we load their certs out of a directory.
-	//
-
-	// load all .pem files from a directory into TLS trust store
-  for _, s := range getSigners() {
-		clientRoot.AppendCertsFromPEM(s.pem)
-	}
-
-	// populate a TLS config object with the signers' certs
-	tlsConfig := &tls.Config{
-		ClientAuth: tls.RequireAndVerifyClientCert,
-		ClientCAs:  clientRoot,
-	}
-
 	// now make an HTTP server using the self-signed-ready tls.Config
 	//tlsConfig.BuildNameToCertificate()
 	server := &http.Server{
-		Addr:      ":" + strconv.Itoa(cfg.Port),
-		TLSConfig: tlsConfig,
+		Addr: ":" + strconv.Itoa(cfg.Port),
+		TLSConfig: &tls.Config{
+			ClientAuth:            tls.RequireAnyClientCert,
+			VerifyPeerCertificate: sm.VerifyPeerCallback,
+		},
 	}
 
 	log.Status("warden", "starting HTTP on port "+strconv.Itoa(cfg.Port))

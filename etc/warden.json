@@ -1,7 +1,8 @@
 {
   "Port": 9000,
-  "ServerCertFile": "./warden.crt",
-  "ServerKeyFile": "./warden.key",
-  "ServerLogFile": "./warden.log",
+  "Debug": true,
+  "ServerCertFile": "./certs/server.pem",
+  "ServerKeyFile": "./certs/server.key",
+  "ServerLogFile": "",
   "SignersDir": "./signers"
 }
