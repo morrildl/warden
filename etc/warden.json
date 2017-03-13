@@ -4,5 +4,19 @@
   "ServerCertFile": "./certs/server.pem",
   "ServerKeyFile": "./certs/server.key",
   "ServerLogFile": "",
-  "SignersDir": "./signers"
+  "SignersDir": "./signers",
+  "Handlers": {
+    "Dummy": {
+      "Hello": "hello i am Dumy",
+      "Invert": false
+    },
+    "AnotherDummy": {
+      "Hello": "i am also Dmmy to",
+      "Invert": true
+    },
+    "MyCustomSetup": {
+      "KeyPath": "/path/to/nowhere",
+      "SomeSetting": 42
+    }
+  }
 }

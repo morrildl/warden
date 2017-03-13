@@ -1,4 +1,4 @@
-package main
+package warden
 
 import (
 	"bytes"
@@ -7,6 +7,7 @@ import (
 	"crypto/x509"
 	"encoding/hex"
 	"encoding/pem"
+	"encoding/json"
 	"errors"
 	"io/ioutil"
 	"net/http"
@@ -28,7 +29,7 @@ type configType struct {
 	ServerKeyFile  string
 	ServerLogFile  string
 	SignersDir     string
-	AllowedKeys    []string
+	Handlers map[string]json.RawMessage
 }
 
 var cfg configType = configType{
@@ -38,11 +39,22 @@ var cfg configType = configType{
 	"./server.key",
 	"./server.log",
 	"./signers",
-	[]string{},
+	make(map[string]json.RawMessage),
 }
 
 func initConfig() {
 	config.Load(&cfg)
+
+	for k, rm := range cfg.Handlers {
+		cobj, ok := signHandlers[k]
+		if ok {
+			if err := json.Unmarshal([]byte(rm), cobj.config); err != nil {
+				log.Error("initConfig", "error unmarshaling SignFunc-specific config for '" + k + "'")
+			}
+		} else {
+			log.Warn("initConfig", "config provided for unregistered SignFunc '" + k + "'")
+		}
+	}
 
 	if cfg.ServerLogFile != "" {
 		log.SetLogFile(cfg.ServerLogFile)
@@ -95,8 +107,6 @@ func (sm *SignerManager) GetSigners() []signer {
 	if err != nil {
 		panic(err)
 	}
-
-	log.Debug("SignerManager.GetSigners", "lulz", files)
 
 	ret := []signer{}
 	for _, fi := range files {
@@ -198,8 +208,6 @@ func (sm *SignerManager) VerifyPeerCallback(rawCerts [][]byte, verifiedChains []
 	// need to support multiple signer clients, so we load their certs out of a directory.
 	//
 
-	log.Debug("SignerManager.VerifyPeerCallback", "called")
-
 	if len(rawCerts) != 1 {
 		return errors.New("expecting only a single cert")
 	}
@@ -212,8 +220,6 @@ func (sm *SignerManager) VerifyPeerCallback(rawCerts [][]byte, verifiedChains []
 		return errors.New("multiple certs provided")
 	}
 	client := certs[0]
-
-	log.Debug("SignerManager.VerifyPeerCallback", "cert stuff", client.Subject.CommonName)
 
 	for _, s := range sm.GetSigners() {
 		if sm.Same(client, s.cert) {
@@ -258,7 +264,21 @@ func (sm *SignerManager) Same(left *x509.Certificate, right *x509.Certificate) b
 	return true
 }
 
-func main() {
+//type SignFunc func(payload []byte, config interface{}) (int, string, []byte)
+
+type signHandler struct {
+	name string
+	config interface{}
+	handler func(payload []byte, config interface{}) (int, string, []byte)
+}
+
+var signHandlers map[string]*signHandler = make(map[string]*signHandler)
+
+func SignFunc(name string, config interface{}, handler func(payload []byte, config interface{}) (int, string, []byte)) {
+	signHandlers[name] = &signHandler{name, config, handler}
+}
+
+func ListenAndServe() error {
 	initConfig()
 
 	if !cfg.Debug {
@@ -295,19 +315,16 @@ func main() {
 			}
 			httputil.Send(writer, http.StatusOK, "application/x-pem-file", buf.Bytes())
 		case "PUT":
-			log.Debug("main/signers", "puticules")
 			body, err := ioutil.ReadAll(req.Body)
 			if err != nil {
 				httputil.SendJSON(writer, http.StatusBadRequest, struct{}{})
 				return
 			}
-			log.Debug("main/signers", "read")
 			err = sm.AddSigner(body)
 			if err != nil {
 				httputil.SendJSON(writer, http.StatusConflict, struct{}{})
 				return
 			}
-			log.Debug("main/signers", "disk")
 			httputil.SendJSON(writer, http.StatusOK, struct{}{})
 		case "DELETE":
 			body, err := ioutil.ReadAll(req.Body)
@@ -326,28 +343,44 @@ func main() {
 		}
 	})
 
-	http.HandleFunc("/keys", func(writer http.ResponseWriter, req *http.Request) {
-		// GET /keys -- list of key fingerprints available for signing
-		//   I: None
-		//   O: {AvailableKeys: [""]}
-		//   200: success
-		// Non-GET: 405 (bad method)
-		defer recoverAndError(writer)
-		httputil.SendJSON(writer, http.StatusOK, struct{}{})
-	})
-
 	http.HandleFunc("/sign/", func(writer http.ResponseWriter, req *http.Request) {
 		// POST /sign/<fingerprint> -- request a binary be signed
 		//   I: application/octet-stream
-		//   O: application/octet-stream
-		//   200: signed data; 404: unrecognized fingerprint; 400: missing body
+		//   O: whatever payload and content-type the signing callback returns
+		//   200: signed data; 404: unrecognized config; 400: missing body
 		// Non-POST: 405 (bad method)
 		defer recoverAndError(writer)
-		httputil.SendJSON(writer, http.StatusOK, struct{}{})
+
+		chunks := strings.Split(req.URL.Path, "/")
+		if len(chunks) != 3 {
+			httputil.SendJSON(writer, http.StatusBadRequest, struct{}{})
+			return
+		}
+
+		name := chunks[2]
+		handler, ok := signHandlers[name]
+		if !ok {
+			httputil.SendJSON(writer, http.StatusNotFound, struct{}{})
+			return
+		}
+
+		payload, err := ioutil.ReadAll(req.Body)
+		if err != nil {
+			log.Warn("main/sign", "error reading request body", err)
+			httputil.SendJSON(writer, http.StatusInternalServerError, struct{}{})
+			return
+		} else {
+			if payload == nil || len(payload) == 0 {
+				httputil.SendJSON(writer, http.StatusBadRequest, struct{}{})
+				return
+			}
+		}
+
+		resCode, contentType, body := handler.handler(payload, handler.config)
+		httputil.Send(writer, resCode, contentType, body)
 	})
 
 	// now make an HTTP server using the self-signed-ready tls.Config
-	//tlsConfig.BuildNameToCertificate()
 	server := &http.Server{
 		Addr: ":" + strconv.Itoa(cfg.Port),
 		TLSConfig: &tls.Config{
@@ -357,5 +390,5 @@ func main() {
 	}
 
 	log.Status("warden", "starting HTTP on port "+strconv.Itoa(cfg.Port))
-	log.Error("warden", "shutting down; error?", server.ListenAndServeTLS(cfg.ServerCertFile, cfg.ServerKeyFile))
+	return server.ListenAndServeTLS(cfg.ServerCertFile, cfg.ServerKeyFile)
 }
