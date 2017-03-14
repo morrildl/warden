@@ -35,6 +35,7 @@ func main() {
 	warden.SignFunc("Dummy", &signfuncs.DemoConfig{}, signfuncs.DemoSignFunc)
 	warden.SignFunc("AnotherDummy", &signfuncs.DemoConfig{}, signfuncs.DemoSignFunc)
 	warden.SignFunc("MyCustomSetup", &MyCustomConfig{}, MyCustomFunc)
+	warden.SignFunc("STM32", &signfuncs.STM32Config{}, signfuncs.STM32SignFunc)
 
 	/* The above will populate the following URLs:
 		 /sign/Dummy -- using the provided demo/dummy SignFunc

@@ -17,6 +17,10 @@
     "MyCustomSetup": {
       "KeyPath": "/path/to/nowhere",
       "SomeSetting": 42
+    },
+    "STM32": {
+      "PrivateKeyPath": "./private_key.pem",
+      "MaxFileSize": 491520
     }
   }
 }
