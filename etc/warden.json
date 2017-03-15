@@ -19,7 +19,7 @@
       "SomeSetting": 42
     },
     "STM32": {
-      "PrivateKeyPath": "./private_key.pem",
+      "PrivateKeyPath": "./private.pem",
       "MaxFileSize": 491520
     }
   }
