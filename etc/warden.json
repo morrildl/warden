@@ -5,22 +5,41 @@
   "ServerKeyFile": "./certs/server.key",
   "ServerLogFile": "",
   "SignersDir": "./signers",
+
   "Handlers": {
-    "Dummy": {
-      "Hello": "hello i am Dumy",
-      "Invert": false
+    "demo": {
+      "Dummy": {
+        "AuthorizedKeys": ["2A:1D:2F:76:A6:36:FE:88:3D:75:14:3B:A5:3C:04:3B:12:FF:91:3D:87:46:AE:9A:6B:23:13:B5:FF:07:08:36"],
+        "Config": {
+          "Hello": "hello i am Dumy",
+          "Invert": false
+        }
+      },
+      "AnotherDummy": {
+        "AuthorizedKeys": [],
+        "Config": {
+          "Hello": "i am also Dmmy to",
+          "Invert": true
+        }
+      }
     },
-    "AnotherDummy": {
-      "Hello": "i am also Dmmy to",
-      "Invert": true
+    "stm32": {
+      "STM32": {
+        "AuthorizedKeys": [],
+        "Config": {
+          "PrivateKeyPath": "./private.pem",
+          "MaxFileSize": 491520
+        }
+      }
     },
-    "MyCustomSetup": {
-      "KeyPath": "/path/to/nowhere",
-      "SomeSetting": 42
-    },
-    "STM32": {
-      "PrivateKeyPath": "./private.pem",
-      "MaxFileSize": 491520
+    "custom": {
+      "MyCustomSetup": {
+        "AuthorizedKeys": [],
+        "Config": {
+          "KeyPath": "/path/to/nowhere",
+          "SomeSetting": 42
+        }
+      }
     }
   }
 }

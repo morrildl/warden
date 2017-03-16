@@ -16,8 +16,8 @@ This provides the following advantages:
   only mounted when you want to use it, and stored in a safe otherwise
 
 Additionally, though this is not currently supported, it paves the way for storing private keys in
-protected hardware, such as a crypto smartcard. This would require driver support for particular
-hardware, though.
+protected hardware (HSM), such as a crypto smartcard. This would require driver support for
+particular hardware, though.
 
 Warden is pretty low overhead -- you could even install it on a Raspberry Pi.
 
@@ -47,17 +47,60 @@ runs no other software.
 
 ## Authorizing Signing Clients
 
-Warden is given a directory containing PEM-encoded X509 certificates of clients that are authorized
-to make TLS connections. For each incoming TLS (HTTPS) request, Warden compares the client cert to
-its whitelist; if the client is not whitelisted, Warden simply drops the TLS connection outright.
+Warden controls access to signing at two levels, based on client certificates. Clients must present
+a standard X509 peer certificate during the TLS connection.
 
-Once the TLS handshake is complete, however, Warden has no further internal ACLs. Any whitelisted
-client that completes a TLS connection is allowed to request any configured signature scheme. This
-is by design: Warden is intended to provide logging, auditability, and increased security
-of the same kinds of signing operations you'd normally do directly on your build server. It's not
-intended to be a general ACL system. You still need to secure your build server.
+As the first level, Warden is given a directory containing PEM-encoded X509 certificate files of
+clients that are authorized to make TLS connections. For each incoming TLS (HTTPS) request, Warden
+compares the client cert to its whitelist; if the client is not whitelisted, Warden simply drops the
+TLS connection outright, before any HTTP data is exchanged.
 
-To authorize a new client cert, make the following REST request: `PUT /signers` with a payload
+Once the connection is established, Warden can optionally enforce access to specific signing
+configurations on a per-certificate level. In the config file for a particular endpoint (see later
+sections), you can specify an `AuthorizedKeys` field. The values must be the certificate fingerprint
+-- that is, a hex string representation of the SHA256 hash of the full DER-encoded client
+certificate. For each request to an endpoint configured with `AuthorizedKeys`, Warden will ensure
+that the client certificate is in the list (ignoring case and non-hex characters like colons -- so
+any hex-like representation will work.)
+
+You can obtain the appropriate fingerprint for a given client cert using `openssl`:
+    
+    openssl x509 -sha256 -fingerprint -noout -in public_key.pem
+
+If a given endpoint is not configured with an `AuthorizedKeys` field, or that field is empty, Warden
+will allow any whitelisted certificate to sign using that endpoint. 
+
+### Intended Usage
+
+Small organizations or organizations with few products can simply whitelist all clients authorized
+to sign (such as a build server, and small number of build engineers.) But organizations that wish
+to have more granular control can configure Warden to restrict specific endpoints to specific clients.
+
+For instance, all whitelisted client certs could be permitted to sign using a debug key for daily
+builds, while access to the key for production builds is restricted to a single client.
+
+### Compatible Certificates
+
+You can generate suitable client certificates using `openssl`:
+
+    openssl genrsa -out new.key 2048 # generate a 2048-bit RSA private key
+    openssl req -new -key new.key -out new.csr -days 3650 # generate a certificate signing request
+    openssl x509 -in new.csr -out new.pem -req -signkey center.key -days 3650 # self-sign the cert
+    rm new.csr # certificate signing request not needed once cert is generated
+
+You can naturally use RSA key sizes greater than 2048, or any other compatible key -- e.g. you could
+use an elliptic curve algorithm. Anything that works with TLS is fine.
+
+Note that Warden intentionally does not use a certificate authority here. Warden authorizes *a
+specific private key* to have access; it does not implement any PKI chain of trust. The reason is
+that using a CA cert means that if that CA private key is compromised, it can be used to generate
+any number of other certs that will be trusted by the server. Since Warden is intended only for
+point-to-point access from specific machines, it doesn't benefit from the tradeoff that PKI makes
+that increases risk for improved convenience.
+
+### Whitelisting Clients
+
+To whitelist a new client cert, make the following REST request: `PUT /signers` with a payload
 content-type of `application/x-pem-file`, and contents consisting of the (raw, no multipart or form
 data) PEM-encoded x509 certificate (i.e. public key) of the new client.
 
@@ -77,30 +120,13 @@ Alternatively, you can manually copy a `.pem` (public-key) certificate into the 
 configured Warden to use as your client whitelist. In fact, you'll naturally need to do exactly this
 for the first client you want to whitelist.
 
-You can generate suitable client certificates using `openssl`:
-
-    openssl genrsa -out new.key 2048 # generate a 2048-bit RSA private key
-    openssl req -new -key new.key -out new.csr -days 3650 # generate a certificate signing request
-    openssl x509 -in new.csr -out new.pem -req -signkey center.key -days 3650 # self-sign the cert
-    rm new.csr # certificate signing request not needed once cert is generated
-
-You can naturally use RSA key sizes greater than 2048, or any other compatible key -- e.g. you could
-use an elliptic curve algorithm. Anything that works with TLS is fine.
-
-Note that we intentionally do not use a certificate authority here. Warden authorizes *a specific
-RSA key* to have access; it does not implement any PKI chain of trust. The reason is that using a CA
-cert means that if that CA private key is compromised, it can be used to generate any number of
-other certs that will be trusted by the server. Since Warden is intended only for point-to-point
-access from specific machines, it doesn't benefit from the tradeoff that PKI makes that increases
-risk for improved convenience.
-
 If you wish to view the list of currently-authorized client certificates, you can issue an
 unqualified `GET /signers` request, which will return a concatenation of all authorized PEM files --
 essentially the contents of the `signers` directory in configuration.
 
 Once the HTTPS request completes, the new certificate can immediately begin using the server.
 
-## Revoking Signing Clients
+### Revoking Clients from the Whitelist
 
 To remove a client certificate's access, make the following REST request: `DELETE /signers` with a
 payload of the complete PEM-encoded certificate you wish to delete. The reason the full certificate
@@ -108,7 +134,7 @@ is required is to prevent ambiguity: it is possible to issue a certificate with 
 serial number, etc. The only thing Warden cares about is essentially the public key fingerprint, but
 ultimately it needs to full certificate to unambiguously de-whitelist clients.
 
-Note that you can fetch a list of all certificates via a `GET` request, as above. So if you need to
+Note again that you can fetch a list of all certificates via a `GET` request, as above. So if you need to
 urgently de-whitelist a certificate that you don't have handy, you can simply fetch them from the
 server, identify the one you want to delete, and then issue the `DELETE` query.
 
@@ -124,11 +150,17 @@ If you need to inspect the current whitelist:
 
 This will let you identify which cert PEM you need to upload to de-whitelist the client.
 
-As with adding new certificates, you can also naturally revoke a certificate by simply deleting the
-appropriate `.pem` file from the Warden server.
+As with adding new certificates, you can, naturally, also revoke a certificate by simply deleting
+the appropriate `.pem` file from the Warden server.
 
 Once the HTTPS request completes, requests by the deleted certificate will immediately be rejected
 by the server.
+
+### Granting and Removing Access to Specific Endpoints
+
+The seconds above manage the first layer of authentication, the TLS certificate whitelist. If you
+wish to make use of Warden's second layer of authorization -- the `AuthorizedKeys` list for each
+endpoint -- then you will currently need to edit the JSON configuration file.
 
 ## Requesting a Signature
 
@@ -147,6 +179,13 @@ will happily sign any opaque blob, although it does overwrite the input data at 
 metadata for the signing operation. On the other hand, the Android `.APK` app signing scheme works
 by generating and signing a manifest file and then repackaging the input, so the input must be a
 properly-formed unsigned Android app ZIP file, as generated by the Android SDK.
+
+# Logging and Auditing
+
+Records of which client certificates sign payloads via which endpoints is recorded in the Warden
+log, at the Status level. Each signing scheme in the library included with Warden performs such
+logging; however if you add a custom signing scheme and build your own Warden binary, you'll need to
+ensure that it performs equivalent logging.
 
 # Warden Configuration
 
@@ -167,21 +206,39 @@ hook code in `src/main/default.go`:
   "SignersDir": "./signers",
 
   "Handlers": {
-    "Dummy": {
-      "Hello": "hello i am Dumy",
-      "Invert": false
+    "demo": {
+      "Dummy": {
+        "AuthorizedKeys": ["2A:1D:2F:76:A6:36:FE:88:3D:75:14:3B:A5:3C:04:3B:12:FF:91:3D:87:46:AE:9A:6B:23:13:B5:FF:07:08:36"],
+        "Config": {
+          "Hello": "hello i am Dumy",
+          "Invert": false
+        }
+      },
+      "AnotherDummy": {
+        "AuthorizedKeys": [],
+        "Config": {
+          "Hello": "i am also Dmmy to",
+          "Invert": true
+        }
+      }
     },
-    "AnotherDummy": {
-      "Hello": "i am also Dmmy to",
-      "Invert": true
+    "stm32": {
+      "STM32": {
+        "AuthorizedKeys": [],
+        "Config": {
+          "PrivateKeyPath": "./private.pem",
+          "MaxFileSize": 491520
+        }
+      }
     },
-    "MyCustomSetup": {
-      "KeyPath": "/path/to/nowhere",
-      "SomeSetting": 42
-    },
-    "STM32": {
-      "PrivateKeyPath": "./private.pem",
-      "MaxFileSize": 491520
+    "custom": {
+      "MyCustomSetup": {
+        "AuthorizedKeys": [],
+        "Config": {
+          "KeyPath": "/path/to/nowhere",
+          "SomeSetting": 42
+        }
+      }
     }
   }
 }
@@ -204,6 +261,9 @@ are 4 such endpoints configured:
 * `/sign/MyCustomSetup` -- another no-op example included in `src/main/default.go` as an example of custom schemes
 * `/sign/STM32` -- an instance of the (real, working) STM32 microcontroller image signing scheme
 
+The `Dummy` endpoint is configured to restrict signing to a particular certificate, via the
+`AuthorizedKeys` field; the others have no such restriction.
+
 Within each named block are additional configuration fields. These fields vary by signing scheme,
 but in general you can expect each scheme to require at least the past to a private key file -- for
 example, the `"PrivateKeyPath"` parameter to the `/sign/STM32` endpoint.
@@ -214,9 +274,15 @@ using a different key. For instance, you can have 2 Andorid `.APK` endpoints, on
 your Android platform key that you use to sign core preloaded apps, and another configured with your
 app key that you use for apps you publish to Play Store.
 
+In general, if your configuration file does not make reference to a particular signing scheme, it
+will simply be dormant code in the binary.
+
 # Building and Customizing Warden
 
-TODO: finalize config-vs-custom-build and document
+The configuration instructions above assume that you are using the standard Warden binary,
+configuring endpoints only from the library of included signing schemes. However, Warden was
+designed to be easy to extend by adding your own signing schemes and building a custom Warden
+binary.
 
 ## Writing Custom Signing Schemes
 
