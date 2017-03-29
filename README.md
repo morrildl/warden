@@ -309,3 +309,13 @@ You can then rename the binary and run it with a configuration file:
 
     mv default warden
     ./warden -config etc/warden.json
+
+# Recipes
+
+## Extract Keys from Java Keystore
+
+    keytool -importkeystore -srckeystore ~/.android/debug.keystore -destkeystore asdf.p12 -srcstoretype JKS -deststoretype PKCS12 -destkeypass asdfgh
+    openssl pkcs12 -in asdf.p12 -nokeys -out mykey.crt
+    openssl pkcs12 -in asdf.p12 -nocerts -nodes -out mykey.tmp
+    openssl rsa -in mykey.tmp -out mykey.crt
+    rm mykey.tmp asdf.p12

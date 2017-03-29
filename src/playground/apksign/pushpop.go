@@ -26,3 +26,33 @@ func pop64(in []byte) (uint64, []byte) {
 func popN(in []byte, count int) ([]byte, []byte) {
 	return in[:count], in[count:]
 }
+
+func push32(in []byte) []byte {
+	l := uint32(len(in))
+	out := make([]byte, l+4)
+	binary.LittleEndian.PutUint32(out, l)
+	copy(out[4:], in)
+	return out
+}
+
+func push64(in []byte) []byte {
+	l := uint64(len(in))
+	out := make([]byte, l+8)
+	binary.LittleEndian.PutUint64(out, l)
+	copy(out[8:], in)
+	return out
+}
+
+func concat(blocks ...[]byte) []byte {
+	totes := 0
+	for _, b := range blocks {
+		totes += len(b)
+	}
+	out := make([]byte, totes)
+	cur := out
+	for _, b := range blocks {
+		copy(cur, b)
+		cur = cur[len(b):]
+	}
+	return out
+}

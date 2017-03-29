@@ -10,8 +10,7 @@ import (
 	"crypto/x509"
 	"encoding/binary"
 	"errors"
-	"hash"
-	"io"
+	"io/ioutil"
 	"os"
 	"time"
 
@@ -182,6 +181,9 @@ func (z *Zip) IsAPKv1Signed() bool {
 }
 
 func (z *Zip) loadRawASv2() error {
+	if z.asv2Offset == 0 {
+		return errors.New("not asv2 signed")
+	}
 	if z.rawASv2 == nil {
 		block, err := z.extractASv2Block()
 		if err != nil {
@@ -245,12 +247,14 @@ func (z *Zip) VerifyV2() bool {
 			}
 		}
 		if algoID == 0 {
+			log.Debug("VerifyV2", "unknown algorithm ID in Signature")
 			return false // we don't know how to verify
 		}
 
 		// Spec: "Verify the corresponding signature from signatures against signed data using public key."
 		pubkey, err := x509.ParsePKIXPublicKey(signer.PublicKey)
 		if err != nil {
+			log.Debug("VerifyV2", "error parsing RSA key", err)
 			return false
 		}
 		switch pubkey.(type) {
@@ -263,12 +267,14 @@ func (z *Zip) VerifyV2() bool {
 			hashed := sha256.Sum256(signer.SignedData.Raw)
 			err = rsa.VerifyPKCS1v15(pubkey.(*rsa.PublicKey), crypto.SHA256, hashed[:], sig.Signature)
 			if err != nil {
+				log.Debug("VerifyV2", "RSA verification failure (0x0103)", err)
 				return false
 			}
 		case 0x0104:
 			hashed := sha512.Sum512(signer.SignedData.Raw)
 			err = rsa.VerifyPKCS1v15(pubkey.(*rsa.PublicKey), crypto.SHA512, hashed[:], sig.Signature)
 			if err != nil {
+				log.Debug("VerifyV2", "RSA verification failure (0x0104)", err)
 				return false
 			}
 		default:
@@ -277,10 +283,12 @@ func (z *Zip) VerifyV2() bool {
 
 		// Spec: "Verify that the ordered list of signature algorithm IDs in digests and signatures is identical."
 		if len(signer.Signatures) != len(signer.SignedData.Digests) {
+			log.Debug("VerifyV2", "signature/digest length mismatch", len(signer.Signatures), len(signer.SignedData.Digests))
 			return false
 		}
 		for i := range signer.Signatures {
 			if signer.Signatures[i].AlgorithmID != signer.SignedData.Digests[i].AlgorithmID {
+				log.Debug("VerifyV2", "signature/digest algorithm mismatch", signer.Signatures[i].AlgorithmID, signer.SignedData.Digests[i].AlgorithmID)
 				return false
 			}
 		}
@@ -288,52 +296,23 @@ func (z *Zip) VerifyV2() bool {
 		// Spec: "Compute the digest of APK contents using the same digest algorithm as the digest
 		// algorithm used by the signature algorithm. Verify that the computed digest is identical to the
 		// corresponding digest from digests."
-		var accumHash hash.Hash
-		var newHash func() hash.Hash
+		var newHash crypto.Hash
 		switch algoID {
 		case 0x0103:
-			newHash = sha256.New
+			newHash = crypto.SHA256
 		case 0x0104:
-			newHash = sha512.New
+			newHash = crypto.SHA512
 		default:
 			return false // this should not be possible due to similar switch above, though
 		}
-		// Per spec, we have to... "revise"... the EOCD block so that its pointer to the CD actually
-		// points to the offset of the ASv2 block. This is because as the ASv2 block changes in length,
-		// it changes the CD offset. Since the ASv2 block is added after the fact and a changing EOCD
-		// would alter the hash, the CD is pointed to the ASv2 before being sent to be hashed.
-		kludgedEOCD := make([]byte, uint64(z.size)-z.eocdOffset)
-		z.file.Seek(int64(z.eocdOffset), 0)
-		n, err := io.ReadFull(z.file, kludgedEOCD)
-		if err != nil || uint64(n) != uint64(z.size)-z.eocdOffset {
-			return false
-		}
-		binary.LittleEndian.PutUint32(kludgedEOCD[16:20], uint32(z.asv2Offset))
 
-		// the signing scheme was specifically designed to be parallelizable, so let's parallelize it :P
-		pendingHashers, err := parallelFileHash(z.file, 0, z.asv2Offset, newHash)
+		d := DigesterFromZip(z, newHash)
+		ourDigest, err := d.ChunkedFileDigest()
 		if err != nil {
+			log.Debug("VerifyV2", "digester failure", err)
 			return false
 		}
-		tmp, err := parallelFileHash(z.file, z.cdOffset, z.eocdOffset-z.cdOffset, newHash)
-		if err != nil {
-			return false
-		}
-		pendingHashers = append(pendingHashers, tmp...)
-		pendingHashers = append(pendingHashers, parallelBufferHash(z.file, kludgedEOCD, newHash)...)
-		numChunks := make([]byte, 4)
-		binary.LittleEndian.PutUint32(numChunks, uint32(len(pendingHashers)))
-		accumHash = newHash()
-		accumHash.Write([]byte{0x5a})
-		accumHash.Write(numChunks)
-		for _, c := range pendingHashers {
-			b := <-c
-			_, err := io.Copy(accumHash, bytes.NewReader(b))
-			if err != nil {
-				return false
-			}
-		}
-		ourDigest := accumHash.Sum(nil)
+
 		ok := bytes.Equal(ourDigest, dig.Digest)
 		if !ok {
 			log.Debug("VerifyV2", "hash mismatch")
@@ -346,6 +325,7 @@ func (z *Zip) VerifyV2() bool {
 		cpk := signer.SignedData.Certs[0].RawSubjectPublicKeyInfo
 		ok = bytes.Equal(cpk, signer.PublicKey)
 		if !ok {
+			log.Debug("VerifyV2", "SubjectPublicKeyInfo mismatch")
 			return false
 		}
 	}
@@ -357,7 +337,17 @@ func (z *Zip) SignV1(out string) error {
 	return errors.New("v1 signing support not implemented yet")
 }
 
-func (z *Zip) SignV2(out string) error {
+func (z *Zip) SignV2(keys []*SigningKey) error {
+	for _, sk := range keys {
+		if err := sk.Resolve(); err != nil {
+			return err
+		}
+	}
+
+	v2 := V2Block{}
+	if err := v2.Sign(z, keys); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -396,4 +386,23 @@ func (z *Zip) extractASv2Block() ([]byte, error) {
 	}
 
 	return b[:len(b)-24], nil
+}
+
+func (z *Zip) InjectBeforeCD(data []byte) error {
+	name := z.file.Name() + "-signed"
+	z.file.Seek(0, 0)
+	all, err := ioutil.ReadAll(z.file)
+	if err != nil {
+		return err
+	}
+	outf, err := os.Create(name)
+	if err != nil {
+		return err
+	}
+	defer outf.Close()
+	binary.LittleEndian.PutUint32(all[z.eocdOffset+16:], uint32(len(data))+uint32(z.cdOffset))
+	outf.Write(all[:z.cdOffset])
+	outf.Write(data)
+	outf.Write(all[z.cdOffset:])
+	return nil
 }
