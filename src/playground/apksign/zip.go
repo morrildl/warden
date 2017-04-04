@@ -18,7 +18,7 @@ import (
 )
 
 // This package contains a class for performing certain operations on ZIP files required for signing
-// Android APKs. In particular, it supports the "Android Signing Scheme v2" introduced in Nougat.
+// Android APKs. It supports the "Android Signing Scheme v2" introduced in Nougat.
 // See https://source.android.com/security/apksigning/v2.html
 
 type Zip struct {
@@ -180,21 +180,6 @@ func (z *Zip) IsAPKv1Signed() bool {
 	return false
 }
 
-func (z *Zip) loadRawASv2() error {
-	if z.asv2Offset == 0 {
-		return errors.New("not asv2 signed")
-	}
-	if z.rawASv2 == nil {
-		block, err := z.extractASv2Block()
-		if err != nil {
-			return err
-		}
-		z.rawASv2 = make([]byte, len(block))
-		copy(z.rawASv2, block)
-	}
-	return nil
-}
-
 func (z *Zip) IsAPKv2Signed() bool {
 	err := z.loadRawASv2()
 	if err != nil {
@@ -351,6 +336,40 @@ func (z *Zip) SignV2(keys []*SigningKey) error {
 	return nil
 }
 
+func (z *Zip) InjectBeforeCD(data []byte) error {
+	name := z.file.Name() + "-signed"
+	z.file.Seek(0, 0)
+	all, err := ioutil.ReadAll(z.file)
+	if err != nil {
+		return err
+	}
+	outf, err := os.Create(name)
+	if err != nil {
+		return err
+	}
+	defer outf.Close()
+	binary.LittleEndian.PutUint32(all[z.eocdOffset+16:], uint32(len(data))+uint32(z.cdOffset))
+	outf.Write(all[:z.cdOffset])
+	outf.Write(data)
+	outf.Write(all[z.cdOffset:])
+	return nil
+}
+
+func (z *Zip) loadRawASv2() error {
+	if z.asv2Offset == 0 {
+		return errors.New("not asv2 signed")
+	}
+	if z.rawASv2 == nil {
+		block, err := z.extractASv2Block()
+		if err != nil {
+			return err
+		}
+		z.rawASv2 = make([]byte, len(block))
+		copy(z.rawASv2, block)
+	}
+	return nil
+}
+
 func (z *Zip) extractASv2Block() ([]byte, error) {
 	b64 := make([]byte, 8)
 	z.file.Seek(int64(z.asv2Offset), 0)
@@ -386,23 +405,4 @@ func (z *Zip) extractASv2Block() ([]byte, error) {
 	}
 
 	return b[:len(b)-24], nil
-}
-
-func (z *Zip) InjectBeforeCD(data []byte) error {
-	name := z.file.Name() + "-signed"
-	z.file.Seek(0, 0)
-	all, err := ioutil.ReadAll(z.file)
-	if err != nil {
-		return err
-	}
-	outf, err := os.Create(name)
-	if err != nil {
-		return err
-	}
-	defer outf.Close()
-	binary.LittleEndian.PutUint32(all[z.eocdOffset+16:], uint32(len(data))+uint32(z.cdOffset))
-	outf.Write(all[:z.cdOffset])
-	outf.Write(data)
-	outf.Write(all[z.cdOffset:])
-	return nil
 }

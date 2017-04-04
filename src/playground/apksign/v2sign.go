@@ -292,9 +292,9 @@ func (v2 *V2Block) Sign(z *Zip, keys []*SigningKey) error {
 		s := &Signer{}
 		s.SignedData = &SignedData{}
 		s.Signatures = make([]*Signature, 0)
-		s.PublicKey = make([]byte, len(sks[0].cert.RawSubjectPublicKeyInfo))
-		copy(s.PublicKey, sks[0].cert.RawSubjectPublicKeyInfo)
-		s.SignedData.Certs = []*x509.Certificate{sks[0].cert} // certHash guarantees these are all the same
+		s.PublicKey = make([]byte, len(sks[0].Certificate.RawSubjectPublicKeyInfo))
+		copy(s.PublicKey, sks[0].Certificate.RawSubjectPublicKeyInfo)
+		s.SignedData.Certs = []*x509.Certificate{sks[0].Certificate} // certHash guarantees these are all the same
 		s.SignedData.Digests = make([]*Digest, 0)
 
 		// each entry under the same cert will differ as a tuple of (KeyType, HashType), which is "algorithm ID" per ASv2

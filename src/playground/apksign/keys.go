@@ -19,35 +19,13 @@ import (
 )
 
 type SigningKey struct {
-	CertPath string
-	KeyPath  string
-	Type     KeyAlgorithm
-	Hash     HashAlgorithm
-	cert     *x509.Certificate
-	certHash string
-	key      *rsa.PrivateKey
-}
-
-func safeLoad(path string) ([]byte, error) {
-	var err error
-	origPath := path
-	if path, err = filepath.Abs(path); err != nil {
-		log.Error("apksign.safeLoad", "file '"+path+"' does not resolve")
-		return nil, err
-	}
-	if origPath != path {
-		log.Warn("apksign.safeLoad", "path '"+path+"' is a symlink")
-	}
-	if stat, err := os.Stat(path); err != nil || (stat != nil && stat.IsDir()) {
-		log.Error("apksign.safeLoad", "file '"+path+"' does not stat or is a directory", err)
-		return nil, err
-	}
-	fileBytes, err := ioutil.ReadFile(path)
-	if err != nil {
-		log.Error("apksign.safeLoad", "file '"+path+"' failed to load", err)
-		return nil, err
-	}
-	return fileBytes, nil
+	CertPath    string
+	KeyPath     string
+	Type        KeyAlgorithm
+	Hash        HashAlgorithm
+	Certificate *x509.Certificate
+	certHash    string
+	Key         *rsa.PrivateKey
 }
 
 func (sk *SigningKey) Resolve() error {
@@ -107,7 +85,7 @@ func (sk *SigningKey) Resolve() error {
 			log.Debug("SigningKey.Resolve", "certificate public key does not match private key's copy", key.N, certPubKey.N, key.E, certPubKey.E)
 			return errors.New("certificate public key does not match private key's copy")
 		}
-		sk.cert, sk.key, sk.certHash = cert, key, certHash
+		sk.Certificate, sk.Key, sk.certHash = cert, key, certHash
 		return nil
 
 	case EC:
@@ -124,7 +102,7 @@ func (sk *SigningKey) Sign(data []byte, hash crypto.Hash) ([]byte, error) {
 	h := hash.New()
 	h.Write(data)
 	sum := h.Sum(nil)
-	res, err := rsa.SignPKCS1v15(rng, sk.key, hash, sum)
+	res, err := rsa.SignPKCS1v15(rng, sk.Key, hash, sum)
 	if err != nil {
 		log.Debug("SigningKey.Sign", "error during sign", err)
 	}
@@ -140,4 +118,26 @@ func (sk *SigningKey) GetHasher() hash.Hash {
 	default:
 		return nil
 	}
+}
+
+func safeLoad(path string) ([]byte, error) {
+	var err error
+	origPath := path
+	if path, err = filepath.Abs(path); err != nil {
+		log.Error("apksign.safeLoad", "file '"+path+"' does not resolve")
+		return nil, err
+	}
+	if origPath != path {
+		log.Warn("apksign.safeLoad", "path '"+path+"' is a symlink")
+	}
+	if stat, err := os.Stat(path); err != nil || (stat != nil && stat.IsDir()) {
+		log.Error("apksign.safeLoad", "file '"+path+"' does not stat or is a directory", err)
+		return nil, err
+	}
+	fileBytes, err := ioutil.ReadFile(path)
+	if err != nil {
+		log.Error("apksign.safeLoad", "file '"+path+"' failed to load", err)
+		return nil, err
+	}
+	return fileBytes, nil
 }

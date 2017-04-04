@@ -8,3 +8,6 @@
 [submodule "src/vendor/playground/httputil"]
 	path = src/vendor/playground/httputil
 	url = ssh://code.playground.global:29418/studio/playground/httputil
+[submodule "src/vendor/github.com/fullsailor/pkcs7"]
+	path = src/vendor/github.com/fullsailor/pkcs7
+	url = https://github.com/fullsailor/pkcs7
