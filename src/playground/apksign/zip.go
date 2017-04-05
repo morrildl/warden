@@ -3,16 +3,9 @@ package apksign
 import (
 	"archive/zip"
 	"bytes"
-	"crypto"
-	"crypto/rsa"
-	"crypto/sha256"
-	"crypto/sha512"
-	"crypto/x509"
 	"encoding/binary"
 	"errors"
-	"io/ioutil"
-	"os"
-	"time"
+	"strings"
 
 	"playground/log"
 )
@@ -22,32 +15,24 @@ import (
 // See https://source.android.com/security/apksigning/v2.html
 
 type Zip struct {
-	fileName   string
-	file       *os.File
+	IsAPK      bool
+	IsV1Signed bool
+	IsV2Signed bool
+
+	raw        []byte
 	size       int64
-	modified   time.Time
 	eocdOffset uint64
 	cdOffset   uint64
 	asv2Offset uint64
 	rawASv2    []byte
 }
 
-func NewZip(file string) (*Zip, error) {
-	var err error
+func NewZip(buf []byte) (*Zip, error) {
 	z := &Zip{}
-	z.fileName = file
-	if z.file, err = os.Open(file); err != nil {
-		return nil, err
-	}
-	fi, err := z.file.Stat()
-	if err != nil {
-		return nil, err
-	}
-	if fi.IsDir() {
-		return nil, errors.New("input is a directory")
-	}
-	z.size = fi.Size()
-	z.modified = fi.ModTime()
+
+	z.size = int64(len(buf))
+	z.raw = make([]byte, z.size)
+	copy(z.raw, buf)
 
 	// now scan for key offsets: Central Directory (CD) table; End Of Central Directory (EOCD) table;
 	// and the Android Signing Scheme v2 block (ASv2). If the file lacks either a CD or EOCD, it
@@ -59,21 +44,16 @@ func NewZip(file string) (*Zip, error) {
 		return nil, errors.New("input is too small to be a zip")
 	}
 
-	b := make([]byte, 22)
+	var b []byte
+	var start int64
 	for i := uint32(0); i < 65535; i++ {
 		// The "end of central directory" block has 22 bytes of fixed headers, followed by a variable
 		// length comment, whose length is stored in the final 16 bits of the EOCD block. This means
 		// that we can't just look at EOF - 22 for the EOCD magic identifier, we have to read backward
 		// to accommodate a possible zip file comment.
 
-		z.file.Seek(z.size-22-int64(i), 0)
-		n, err := z.file.Read(b)
-		if err != nil {
-			return nil, err
-		}
-		if n < 22 {
-			return nil, errors.New("short read on EOCD fetch")
-		}
+		start = z.size - 22 - int64(i)
+		b = z.raw[start : start+22]
 
 		// check for the EOCD magic string, 0x06054b50. note that zip files are little endian
 		if binary.LittleEndian.Uint32(b[:4]) == 0x06054b50 {
@@ -91,15 +71,7 @@ func NewZip(file string) (*Zip, error) {
 			candidateEOCD := uint64(z.size) - 22 - uint64(i)
 			eocdCD := binary.LittleEndian.Uint32(b[16:20])
 			eocdCDLen := binary.LittleEndian.Uint32(b[12:16])
-			b2 := make([]byte, 4)
-			z.file.Seek(int64(eocdCD), 0)
-			n, err = z.file.Read(b2)
-			if err != nil {
-				return nil, err
-			}
-			if n < 4 {
-				return nil, errors.New("short read on CD fetch")
-			}
+			b2 := z.raw[int64(eocdCD):]
 			if binary.LittleEndian.Uint32(b2) != 0x02014b50 {
 				continue // CD pointed to by "EOCD" is not a valid CD, but there may still be comment bytes to unwind
 			}
@@ -113,25 +85,57 @@ func NewZip(file string) (*Zip, error) {
 			z.cdOffset = uint64(eocdCD)
 			z.eocdOffset = candidateEOCD
 
+			// scan the file using zip library, looking for specific file names
+			r, err := zip.NewReader(bytes.NewReader(z.raw), z.size)
+			if err != nil {
+				return nil, err
+			}
+			hasClassesDex := false
+			hasAndroidManifestXML := false
+			hasResourcesARSC := false
+			hasManifest := false
+			hasSF := false
+			hasRSA := false
+			for _, f := range r.File {
+				switch f.FileHeader.Name {
+				case "classes.dex":
+					hasClassesDex = true
+				case "AndroidManifest.xml":
+					hasAndroidManifestXML = true
+				case "resources.arsc":
+					hasResourcesARSC = true
+				case "META-INF/MANIFEST.MF":
+					hasManifest = true
+				}
+				hasSF = hasSF || strings.HasSuffix(f.FileHeader.Name, ".SF")
+				hasRSA = hasRSA || strings.HasSuffix(f.FileHeader.Name, ".RSA") || strings.HasSuffix(f.FileHeader.Name, ".DSA")
+			}
+			z.IsAPK = hasClassesDex && hasAndroidManifestXML && hasResourcesARSC && hasManifest
+			z.IsV1Signed = hasManifest && (hasSF || hasRSA) // doesn't mean it validates...
+
 			// now see if there is an Android signing v2 block
-			z.file.Seek(int64(z.cdOffset)-16, 0)
-			magic := make([]byte, 16)
-			z.file.Read(magic)
+			start = int64(z.cdOffset) - 16
+			magic := z.raw[start:z.cdOffset]
 			if string(magic) != "APK Sig Block 42" {
 				return z, nil
 			}
 
-			// it has the ASv2 magic in the expected spot, so check size field & compute offset
-			b64 := make([]byte, 8)
-			z.file.Seek(int64(z.cdOffset-16-8), 0) // size field is uint64 & is repeated at start & end of block
-			z.file.Read(b64)
+			// it has the ASv2 magic in the expected spot, so check size fields: size field is uint64 & is
+			// repeated at start & end of block, but pre-size copy does not include itself
+			start = int64(z.cdOffset - 16 - 8)
+			b64 := z.raw[start : start+8]
 			postSize := binary.LittleEndian.Uint64(b64)
-			z.file.Seek(int64(int64(z.cdOffset)-int64(postSize)-8), 0) // size includes magic & 2nd size field but not 1st
-			z.file.Read(b64)
+			start = int64(z.cdOffset - postSize - 8)
+			b64 = z.raw[start : start+8]
 			preSize := binary.LittleEndian.Uint64(b64)
 			if preSize == postSize { // Spec: "Two size fields of APK Signing Block contain the same value"
 				z.asv2Offset = z.cdOffset - postSize - 8
+				z.rawASv2 = make([]byte, preSize-24)
+				start = int64(z.asv2Offset + 8)
+				copy(z.rawASv2, z.raw[start:])
 			}
+
+			z.IsV2Signed = z.asv2Offset > 0
 
 			log.Debug("Zip.New", "ASv2, CD, EOCD", z.asv2Offset, z.cdOffset, z.eocdOffset)
 
@@ -143,266 +147,148 @@ func NewZip(file string) (*Zip, error) {
 	return nil, errors.New("input is not a zip")
 }
 
-func (z *Zip) IsAPK() bool {
-	r, err := zip.NewReader(z.file, z.size)
+func (z *Zip) VerifyV1() error {
+	var r *V1Reader
+	var err error
+
+	if r, err = ParseZip(z.raw, nil); err != nil {
+		return err
+	}
+
+	return r.Verify()
+}
+
+func (z *Zip) VerifyV2() error {
+	var v2 *V2Block
+	var err error
+
+	v2, err = ParseV2Block(z.rawASv2)
 	if err != nil {
-		log.Warn("Zip.IsAPK", "error opening with zip library", err)
-		return false
+		return err
 	}
 
-	// in determining whether it looks like an APK, we just look for 4 key files
-	hasClassesDex := false
-	hasAndroidManifestXML := false
-	hasResourcesARSC := false
-	hasManifest := false
-	for _, f := range r.File {
-		if f.FileHeader.Name == "classes.dex" {
-			hasClassesDex = true
-		} else if f.FileHeader.Name == "AndroidManifest.xml" {
-			hasAndroidManifestXML = true
-		} else if f.FileHeader.Name == "resources.arsc" {
-			hasResourcesARSC = true
-		} else if f.FileHeader.Name == "META-INF/MANIFEST.MF" {
-			hasManifest = true
-		}
-		if hasClassesDex && hasAndroidManifestXML && hasResourcesARSC && hasManifest {
-			// given that Android SDK almost always inserts resources.arsc at the very end of the ZIP,
-			// this will probably never early-break, but eh can't hurt
-			break
-		}
-	}
-
-	return hasClassesDex && hasAndroidManifestXML && hasResourcesARSC && hasManifest
+	return v2.Verify(z)
 }
 
-func (z *Zip) IsAPKv1Signed() bool {
-	panic("v1 signing support not implemented yet")
-	return false
-}
-
-func (z *Zip) IsAPKv2Signed() bool {
-	err := z.loadRawASv2()
-	if err != nil {
-		return false
-	}
-	v2block, err := ParseV2Block(z.rawASv2)
-	return err == nil && v2block != nil
-}
-
-func (z *Zip) VerifyV1() bool {
-	panic("v1 signing support not implemented yet")
-	return false
-}
-
-func (z *Zip) VerifyV2() bool {
-	err := z.loadRawASv2()
-	if err != nil {
-		return false
-	}
-	v2block, err := ParseV2Block(z.rawASv2)
-	if err != nil || v2block == nil {
-		log.Debug("VerifyV2", "failed during parse", err)
-		return false
+func (z *Zip) Verify() error {
+	if z.IsV2Signed {
+		return z.VerifyV2()
 	}
 
-	// extractASv2Block() handles these 3 requirements from the Spec:
-	// "Two size fields of APK Signing Block contain the same value."
-	// "ZIP Central Directory is immediately followed by ZIP End of Central Directory record."
-	// "ZIP End of Central Directory is not followed by more data."
-
-	// Spec: "Verification succeeds if at least one signer was found and step 3 succeeded for each found signer."
-	if len(v2block.Signers) < 1 {
-		return false
-	}
-	for _, signer := range v2block.Signers {
-		var sig *Signature
-		var dig *Digest
-		var algoID uint32
-
-		// Spec: "Choose the strongest supported signature algorithm ID from signatures. The strength
-		// ordering is up to each implementation/platform version."
-		// TODO: Currently we only support RSA, as our primary purpose is signing. Expanding this is fairly
-		// straightforward, though low priority
-		for i, s := range signer.Signatures {
-			if s.AlgorithmID == 0x0103 || s.AlgorithmID == 0x0104 && s.AlgorithmID > algoID {
-				// ignore non-RSA algorithms for now, and favor SHA512 if it's present
-				algoID = s.AlgorithmID
-				sig = s
-				dig = signer.SignedData.Digests[i]
-			}
-		}
-		if algoID == 0 {
-			log.Debug("VerifyV2", "unknown algorithm ID in Signature")
-			return false // we don't know how to verify
-		}
-
-		// Spec: "Verify the corresponding signature from signatures against signed data using public key."
-		pubkey, err := x509.ParsePKIXPublicKey(signer.PublicKey)
-		if err != nil {
-			log.Debug("VerifyV2", "error parsing RSA key", err)
-			return false
-		}
-		switch pubkey.(type) {
-		case *rsa.PublicKey:
-		default:
-			return false
-		}
-		switch algoID {
-		case 0x0103:
-			hashed := sha256.Sum256(signer.SignedData.Raw)
-			err = rsa.VerifyPKCS1v15(pubkey.(*rsa.PublicKey), crypto.SHA256, hashed[:], sig.Signature)
-			if err != nil {
-				log.Debug("VerifyV2", "RSA verification failure (0x0103)", err)
-				return false
-			}
-		case 0x0104:
-			hashed := sha512.Sum512(signer.SignedData.Raw)
-			err = rsa.VerifyPKCS1v15(pubkey.(*rsa.PublicKey), crypto.SHA512, hashed[:], sig.Signature)
-			if err != nil {
-				log.Debug("VerifyV2", "RSA verification failure (0x0104)", err)
-				return false
-			}
-		default:
-			return false
-		}
-
-		// Spec: "Verify that the ordered list of signature algorithm IDs in digests and signatures is identical."
-		if len(signer.Signatures) != len(signer.SignedData.Digests) {
-			log.Debug("VerifyV2", "signature/digest length mismatch", len(signer.Signatures), len(signer.SignedData.Digests))
-			return false
-		}
-		for i := range signer.Signatures {
-			if signer.Signatures[i].AlgorithmID != signer.SignedData.Digests[i].AlgorithmID {
-				log.Debug("VerifyV2", "signature/digest algorithm mismatch", signer.Signatures[i].AlgorithmID, signer.SignedData.Digests[i].AlgorithmID)
-				return false
-			}
-		}
-
-		// Spec: "Compute the digest of APK contents using the same digest algorithm as the digest
-		// algorithm used by the signature algorithm. Verify that the computed digest is identical to the
-		// corresponding digest from digests."
-		var newHash crypto.Hash
-		switch algoID {
-		case 0x0103:
-			newHash = crypto.SHA256
-		case 0x0104:
-			newHash = crypto.SHA512
-		default:
-			return false // this should not be possible due to similar switch above, though
-		}
-
-		d := DigesterFromZip(z, newHash)
-		ourDigest, err := d.ChunkedFileDigest()
-		if err != nil {
-			log.Debug("VerifyV2", "digester failure", err)
-			return false
-		}
-
-		ok := bytes.Equal(ourDigest, dig.Digest)
-		if !ok {
-			log.Debug("VerifyV2", "hash mismatch")
-			return false
-		}
-
-		// Spec: "Verify that SubjectPublicKeyInfo of the first certificate of certificates is identical
-		// to public key."
-		signer := v2block.Signers[0]
-		cpk := signer.SignedData.Certs[0].RawSubjectPublicKeyInfo
-		ok = bytes.Equal(cpk, signer.PublicKey)
-		if !ok {
-			log.Debug("VerifyV2", "SubjectPublicKeyInfo mismatch")
-			return false
-		}
+	if !z.IsV1Signed {
+		return errors.New("APK not recognized as signed")
 	}
 
-	return true
+	return z.VerifyV1()
 }
 
-func (z *Zip) SignV1(out string) error {
-	return errors.New("v1 signing support not implemented yet")
-}
-
-func (z *Zip) SignV2(keys []*SigningKey) error {
+/* SignV1 signs the zip with the provided keys, using the Java signed-JAR signing rubric, only. This
+ * was used by Android up to the Nougat release, when it was supplemented by a more secure
+ * whole-file "v2" scheme. */
+func (z *Zip) SignV1(keys []*SigningKey) (*Zip, error) {
 	for _, sk := range keys {
 		if err := sk.Resolve(); err != nil {
-			return err
-		}
-	}
-
-	v2 := V2Block{}
-	if err := v2.Sign(z, keys); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (z *Zip) InjectBeforeCD(data []byte) error {
-	name := z.file.Name() + "-signed"
-	z.file.Seek(0, 0)
-	all, err := ioutil.ReadAll(z.file)
-	if err != nil {
-		return err
-	}
-	outf, err := os.Create(name)
-	if err != nil {
-		return err
-	}
-	defer outf.Close()
-	binary.LittleEndian.PutUint32(all[z.eocdOffset+16:], uint32(len(data))+uint32(z.cdOffset))
-	outf.Write(all[:z.cdOffset])
-	outf.Write(data)
-	outf.Write(all[z.cdOffset:])
-	return nil
-}
-
-func (z *Zip) loadRawASv2() error {
-	if z.asv2Offset == 0 {
-		return errors.New("not asv2 signed")
-	}
-	if z.rawASv2 == nil {
-		block, err := z.extractASv2Block()
-		if err != nil {
-			return err
-		}
-		z.rawASv2 = make([]byte, len(block))
-		copy(z.rawASv2, block)
-	}
-	return nil
-}
-
-func (z *Zip) extractASv2Block() ([]byte, error) {
-	b64 := make([]byte, 8)
-	z.file.Seek(int64(z.asv2Offset), 0)
-	if n, err := z.file.Read(b64); err != nil || n < 8 {
-		if err != nil {
 			return nil, err
 		}
-		return nil, errors.New("not enough bytes available to read size")
 	}
-	size := binary.LittleEndian.Uint64(b64)
 
-	var fi os.FileInfo
-	fi, err := z.file.Stat()
-	if err != nil {
+	var err error
+	var b []byte
+	w := NewV1Writer()
+
+	if _, err = ParseZip(z.raw, w); err != nil {
 		return nil, err
 	}
-	if (z.asv2Offset + uint64(size)) > (uint64(fi.Size()) - 22) {
-		// if indicated size extends past the max possible w/o running into the EOCD, we know it's not
-		// an ASv2 block
-		log.Debug("extractASv2Block", "short block", z.asv2Offset, z.size, fi.Size())
-		return nil, errors.New("requested ASv2 block is too short")
+
+	if err = w.Sign(keys, false); err != nil {
+		return nil, err
+	}
+	if b, err = w.Marshal(); err != nil {
+		return nil, err
 	}
 
-	b := make([]byte, size)
-	z.file.Read(b)
+	return NewZip(b)
+}
 
-	// check for the magic string at end of block; compare header/footer sizes to make sure they match
-	if string(b[len(b)-16:]) != "APK Sig Block 42" {
-		return nil, errors.New("missing ASv2 sig block magic")
-	}
-	if size != binary.LittleEndian.Uint64(b[len(b)-24:]) {
-		return nil, errors.New("mismatched ASv2 size markers")
+/* SignV2 signs the zip with the provided keys, using the Android-specific whole-file "v2" signing
+ * rubric, only. */
+func (z *Zip) SignV2(keys []*SigningKey) (*Zip, error) {
+	for _, sk := range keys {
+		if err := sk.Resolve(); err != nil {
+			return nil, err
+		}
 	}
 
-	return b[:len(b)-24], nil
+	var b []byte
+	var err error
+	v2 := V2Block{}
+	if b, err = v2.Sign(z, keys); err != nil {
+		return nil, err
+	}
+
+	return NewZip(b)
+}
+
+/* Sign signs the zip with the provided keys, using BOTH the v1 (JAR signer) and v2
+ * (Android-specific whole-file) signing rubrics. Note that `Sign()` IS NOT equivalent to
+ * `SignV1(); SignV2()`. When signed with both schemes, the JAR `.SF` files have an additional
+ * header, per spec. */
+func (z *Zip) Sign(keys []*SigningKey) (*Zip, error) {
+	for _, sk := range keys {
+		if err := sk.Resolve(); err != nil {
+			return nil, err
+		}
+	}
+
+	var w *V1Writer
+	var v2 *V2Block
+	var newZ *Zip
+	var b []byte
+	var err error
+
+	w = NewV1Writer()
+	if _, err = ParseZip(z.raw, w); err != nil {
+		return nil, err
+	}
+
+	if err = w.Sign(keys, true); err != nil {
+		return nil, err
+	}
+	if b, err = w.Marshal(); err != nil {
+		return nil, err
+	}
+	if newZ, err = NewZip(b); err != nil {
+		return nil, err
+	}
+
+	v2 = &V2Block{}
+	if b, err = v2.Sign(newZ, keys); err != nil {
+		return nil, err
+	}
+
+	return NewZip(b)
+}
+
+func (z *Zip) InjectBeforeCD(data []byte) []byte {
+	// compute how much space we'll need for the new bytes
+	newSize := int64(len(z.raw))
+	endOfFilesSection := z.cdOffset
+	if z.asv2Offset > 0 {
+		endOfFilesSection = z.asv2Offset
+		newSize -= int64(z.cdOffset - z.asv2Offset)
+	}
+	newSize += int64(len(data))
+
+	newEocd := make([]byte, z.size-int64(z.eocdOffset))
+	copy(newEocd, z.raw[z.eocdOffset:])
+	binary.LittleEndian.PutUint32(newEocd[16:], uint32(endOfFilesSection+uint64(len(data))))
+
+	// allocate & copy in the data
+	ret := make([]byte, newSize)
+	copy(ret[:endOfFilesSection], z.raw[:endOfFilesSection])
+	copy(ret[endOfFilesSection:endOfFilesSection+uint64(len(data))], data)
+	copy(ret[endOfFilesSection+uint64(len(data)):], z.raw[z.cdOffset:z.eocdOffset])
+	copy(ret[endOfFilesSection+uint64(len(data))+(z.eocdOffset-z.cdOffset):], newEocd)
+
+	return ret
 }

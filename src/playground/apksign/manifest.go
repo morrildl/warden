@@ -45,7 +45,6 @@ func parseManifest(buf []byte) (*manifest, error) {
 	lines := strings.Split(string(buf), "\n")
 	var files []map[string]string
 	var err error
-	log.Debug("parseManifest", "begin")
 	mf.headers, files, err = parseManifestLines(lines)
 	if err != nil {
 		return nil, err
@@ -184,7 +183,6 @@ func parseSignedFile(buf []byte) (*signedFile, error) {
 	lines := strings.Split(string(buf), "\n")
 	var files []map[string]string
 	var err error
-	log.Debug("parseSignedFile", "begin")
 	sf.headers, files, err = parseManifestLines(lines)
 	if err != nil {
 		return nil, err
@@ -206,6 +204,7 @@ func parseSignedFile(buf []byte) (*signedFile, error) {
 		if maxVer == APKSignUnknown {
 			maxVer = APKSignV1
 		}
+		sf.version = maxVer
 	} else {
 		sf.version = APKSignV1
 	}

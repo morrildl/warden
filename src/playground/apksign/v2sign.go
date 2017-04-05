@@ -1,7 +1,11 @@
 package apksign
 
 import (
+	"bytes"
 	"crypto"
+	"crypto/rsa"
+	"crypto/sha256"
+	"crypto/sha512"
 	"crypto/x509"
 	"encoding/binary"
 	"errors"
@@ -273,7 +277,132 @@ func ParseSigner(signer []byte) (*Signer, error) {
 	return &Signer{sds, ss, publicKey}, nil
 }
 
-func (v2 *V2Block) Sign(z *Zip, keys []*SigningKey) error {
+func (v2 *V2Block) Verify(z *Zip) error {
+	// Zip constructor handles these 3 requirements from the Spec:
+	// "Two size fields of APK Signing Block contain the same value."
+	// "ZIP Central Directory is immediately followed by ZIP End of Central Directory record."
+	// "ZIP End of Central Directory is not followed by more data."
+
+	// Spec: "Verification succeeds if at least one signer was found and step 3 succeeded for each found signer."
+	if len(v2.Signers) < 1 {
+		return errors.New("no signers in signing block")
+	}
+	for _, signer := range v2.Signers {
+		var sig *Signature
+		var dig *Digest
+		var algoID uint32
+
+		// Spec: "Choose the strongest supported signature algorithm ID from signatures. The strength
+		// ordering is up to each implementation/platform version."
+		// TODO: Currently we only support RSA, as our primary purpose is signing. Expanding this is fairly
+		// straightforward, though low priority
+		for i, s := range signer.Signatures {
+			if s.AlgorithmID == 0x0103 || s.AlgorithmID == 0x0104 && s.AlgorithmID > algoID {
+				// ignore non-RSA algorithms for now, and favor SHA512 if it's present
+				algoID = s.AlgorithmID
+				sig = s
+				dig = signer.SignedData.Digests[i]
+			}
+		}
+		if algoID == 0 {
+			return errors.New("unknown algorithm ID in Signature") // we don't know how to verify
+		}
+
+		// Spec: "Verify the corresponding signature from signatures against signed data using public key."
+		pubkey, err := x509.ParsePKIXPublicKey(signer.PublicKey)
+		if err != nil {
+			return err
+		}
+		switch pubkey.(type) {
+		case *rsa.PublicKey:
+		default:
+			return errors.New("unsupported signature algorithm (only RSA currently supported)")
+		}
+		switch algoID {
+		case 0x0103:
+			hashed := sha256.Sum256(signer.SignedData.Raw)
+			err = rsa.VerifyPKCS1v15(pubkey.(*rsa.PublicKey), crypto.SHA256, hashed[:], sig.Signature)
+			if err != nil {
+				return err
+			}
+		case 0x0104:
+			hashed := sha512.Sum512(signer.SignedData.Raw)
+			err = rsa.VerifyPKCS1v15(pubkey.(*rsa.PublicKey), crypto.SHA512, hashed[:], sig.Signature)
+			if err != nil {
+				return err
+			}
+		default:
+			return errors.New("unsupported signature/hash combination")
+		}
+
+		// Spec: "Verify that the ordered list of signature algorithm IDs in digests and signatures is identical."
+		if len(signer.Signatures) != len(signer.SignedData.Digests) {
+			return errors.New("signature/digest length mismatch")
+		}
+		for i := range signer.Signatures {
+			if signer.Signatures[i].AlgorithmID != signer.SignedData.Digests[i].AlgorithmID {
+				return errors.New("signature/digest algorithm mismatch")
+			}
+		}
+
+		// Spec: "Compute the digest of APK contents using the same digest algorithm as the digest
+		// algorithm used by the signature algorithm. Verify that the computed digest is identical to the
+		// corresponding digest from digests."
+		var newHash crypto.Hash
+		switch algoID {
+		case 0x0103:
+			newHash = crypto.SHA256
+		case 0x0104:
+			newHash = crypto.SHA512
+		default:
+			// this should not be possible due to similar switch above, though
+			return errors.New("unsupported signature/hash combination")
+		}
+
+		endOfFileSection := z.asv2Offset
+		if endOfFileSection == 0 {
+			endOfFileSection = z.cdOffset
+		}
+
+		d := NewDigester(newHash)
+		d.Write(z.raw[:endOfFileSection])       // send files section to be hashed
+		d.Write(z.raw[z.cdOffset:z.eocdOffset]) // send CD to be hashed as separate block per spec
+
+		// Per spec, we have to... "revise"... the EOCD block so that its pointer to the CD actually
+		// points to the offset of the ASv2 block. This is because as the ASv2 block changes in length,
+		// it changes the CD offset. Since the ASv2 block is added after the fact and a changing EOCD
+		// would alter the hash, the CD is pointed to the ASv2 before being sent to be hashed.
+		// Essentially, this hashes the "pristine" Zip, as it would be if the ASv2 block didn't exist.
+		//
+		// Note that this is a RAM-only operation for signing purposes; on disk, this would be an invalid
+		// Zip file.
+		revisedEOCD := make([]byte, z.size-int64(z.eocdOffset))
+		copy(revisedEOCD, z.raw[z.eocdOffset:])
+		binary.LittleEndian.PutUint32(revisedEOCD[16:20], uint32(endOfFileSection))
+
+		d.Write(revisedEOCD) // send revised EOCD to be hashed as separate block per spec
+
+		ourDigest := d.Sum(nil)
+
+		ok := bytes.Equal(ourDigest, dig.Digest)
+		if !ok {
+			return errors.New("hash mismatch")
+		}
+
+		// Spec: "Verify that SubjectPublicKeyInfo of the first certificate of certificates is identical
+		// to public key."
+		signer := v2.Signers[0]
+		cpk := signer.SignedData.Certs[0].RawSubjectPublicKeyInfo
+		ok = bytes.Equal(cpk, signer.PublicKey)
+		if !ok {
+			return errors.New("SubjectPublicKeyInfo mismatch")
+		}
+	}
+
+	return nil
+}
+
+func (v2 *V2Block) Sign(z *Zip, keys []*SigningKey) ([]byte, error) {
 	v2.Signers = make([]*Signer, 0)
 
 	// the ASv2 scheme spec does not actually forbid having multiple 'signer' blocks with the same
@@ -299,7 +428,6 @@ func (v2 *V2Block) Sign(z *Zip, keys []*SigningKey) error {
 
 		// each entry under the same cert will differ as a tuple of (KeyType, HashType), which is "algorithm ID" per ASv2
 		for _, sk := range sks {
-			log.Debug("loop", "loop")
 			d := &Digest{}
 			sig := &Signature{}
 
@@ -315,20 +443,30 @@ func (v2 *V2Block) Sign(z *Zip, keys []*SigningKey) error {
 					algoID = 0x0104
 					hasher = crypto.SHA512
 				default:
-					return errors.New("unsupported hash algorithm specified")
+					return nil, errors.New("unsupported hash algorithm specified")
 				}
 			default:
-				return errors.New("unsupported key type specified")
+				return nil, errors.New("unsupported key type specified")
 			}
 
-			var err error
-			dg := DigesterFromZip(z, hasher)
 			d.AlgorithmID = algoID
 			sig.AlgorithmID = algoID
-			d.Digest, err = dg.ChunkedFileDigest()
-			if err != nil {
-				return err
+
+			endOfFileSection := z.asv2Offset
+			if endOfFileSection == 0 {
+				endOfFileSection = z.cdOffset
 			}
+
+			dg := NewDigester(hasher)
+			dg.Write(z.raw[:endOfFileSection])       // send files section to be hashed
+			dg.Write(z.raw[z.cdOffset:z.eocdOffset]) // send CD to be hashed as separate block per spec
+
+			revisedEOCD := make([]byte, z.size-int64(z.eocdOffset))
+			copy(revisedEOCD, z.raw[z.eocdOffset:])
+			binary.LittleEndian.PutUint32(revisedEOCD[16:20], uint32(endOfFileSection))
+			dg.Write(revisedEOCD) // send revised EOCD to be hashed as separate block per spec
+
+			d.Digest = dg.Sum(nil)
 
 			s.SignedData.Digests = append(s.SignedData.Digests, d)
 			s.Signatures = append(s.Signatures, sig)
@@ -352,7 +490,7 @@ func (v2 *V2Block) Sign(z *Zip, keys []*SigningKey) error {
 
 			sig.Signature, err = sk.Sign(sd, hasher)
 			if err != nil {
-				return err
+				return nil, err
 			}
 		}
 
@@ -385,19 +523,14 @@ func (v2 *V2Block) Sign(z *Zip, keys []*SigningKey) error {
 	binary.LittleEndian.PutUint64(final[8+len(asv2):], uint64(finalSize))
 	copy(final[len(final)-16:], []byte("APK Sig Block 42"))
 
+	// just a quick sanity check to make sure we generated a block that parses
 	_, er := ParseV2Block(asv2)
 	if er != nil {
-		return er
+		return nil, er
 	}
 
 	// now we have the final bytes, tell the Zip to inject them into its .zip file at the appropriate location
-	err := z.InjectBeforeCD(final)
-	if err != nil {
-		return err
-	}
-
-	// huzzah, it's done
-	return nil
+	return z.InjectBeforeCD(final), nil
 }
 
 func (s *Signer) Marshal() []byte {

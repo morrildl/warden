@@ -130,38 +130,38 @@ func ParseZip(buf []byte, writer *V1Writer) (*V1Reader, error) {
 	return v1, nil
 }
 
-func (v1 *V1Reader) Verify() bool {
+func (v1 *V1Reader) Verify() error {
 	if v1.provided == nil || v1.observed == nil {
-		log.Debug("V1Reader.Verify", "nil reported or observed")
-		return false
+		return errors.New("nil reported or observed")
 	}
 
 	// manifest in the file must match the hashes of the files we actually saw;
 	// this will also check that there are no extra or missing files vs. manifest
 	if !v1.provided.equals(v1.observed) {
-		log.Debug("V1Reader.Verify", "observed & provided manifests do not match")
-		return false
+		return errors.New("observed & provided manifests do not match")
 	}
 
 	// verify each signature from META-INF/
 	for signer, sig := range v1.sigs {
+		if sig.sf.version >= APKSignV2 {
+			return errors.New("signer specified v2 rubric; v2-aware verifiers must abort v1 verification")
+		}
+
 		// .SF file must have hashes that match manifest, and must not have extra or missing files;
 		// this will also verify manifest file hash, although that is optional per spec
 		if !sig.sf.verify(v1.observed) {
-			log.Debug("V1Reader.Verify", ".SF file for '"+signer+"' does not comport with manifest")
-			return false
+			return errors.New(".SF file for '" + signer + "' does not comport with manifest")
 		}
 
 		// verify the actual signature over the original .SF file bytes (not a hash, which seems kind of wrong but...)
 		sig.pkcs7.Content = sig.sf.raw // set bytes to be verified
 		if err := sig.pkcs7.Verify(); err != nil {
-			log.Debug("V1Reader.Verify", "signature for pair fails to verify", err)
-			return false
+			return err
 		}
 	}
 
 	// the manifest matches the actual files, and all signatures verify, so we're done
-	return true
+	return nil
 }
 
 type V1Writer struct {
@@ -240,7 +240,6 @@ func (v1 *V1Writer) Sign(keys []*SigningKey, signifyV2 bool) error {
 			return err
 		}
 
-		log.Debug("V1Writer.Sign", "key", key, key.Certificate, key.Key)
 		if err = sd.AddSigner(key.Certificate, key.Key, pkcs7.SignerInfoConfig{}); err != nil {
 			return err
 		}
