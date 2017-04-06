@@ -5,7 +5,7 @@ import (
 
 	"playground/log"
 	"playground/warden"
-	"playground/warden/signfuncs"
+	_ "playground/warden/signfuncs" // unbound import for side effects (see signfuncs/init.go)
 )
 
 type MyCustomConfig struct {
@@ -37,36 +37,35 @@ func MyCustomFunc(config interface{}, req *warden.SigningRequest) (code int, cty
 }
 
 func main() {
-	warden.SignFunc("Dummy", &signfuncs.DemoConfig{}, signfuncs.DemoSignFunc)
-	warden.SignFunc("AnotherDummy", &signfuncs.DemoConfig{}, signfuncs.DemoSignFunc)
-	warden.SignFunc("MyCustomSetup", &MyCustomConfig{}, MyCustomFunc)
-	warden.SignFunc("STM32", &signfuncs.STM32Config{}, signfuncs.STM32SignFunc)
+	/* Instead of (or in addition to) loading modules via the config file, you can also manually
+	 * configure signing endpoints:
+	 *
+	 * warden.SignFunc("Dummy", &signfuncs.DemoConfig{}, signfuncs.DemoSignFunc)
+	 * warden.SignFunc("AnotherDummy", &signfuncs.DemoConfig{}, signfuncs.DemoSignFunc)
+	 * warden.SignFunc("STM32", &signfuncs.STM32Config{}, signfuncs.STM32SignFunc)
+	 * warden.SignFunc("apk-debug", &signfuncs.APKConfig{}, signfuncs.APKSignFunc)
+	 * warden.SignFunc("apk-release", &signfuncs.APKConfig{}, signfuncs.APKSignFunc)
+	 * warden.SignFunc("MyCustomSetup", &MyCustomConfig{}, MyCustomFunc)
+	 *
+	 * The code above (which is equivalent to the example config file in `etc/warden-config.json`)
+	 * results in these endpoints available via HTTPS/REST:
+	 *
+	 * /sign/Dummy -- using the provided demo/dummy SignFunc
+	 * /sign/AnotherDummy -- using the same code, but different config
+	 * /sign/apk-debug & /sign/apk-release -- another pair, for Android APKs, with 2 keys for debug & release
+	 * /sign/STM32 -- STM32 microcontroller signer
+	 * /sign/MyCustomSetup -- using the config + callback code above, in this very file
+	 *
+	 * Note that you can register the same handler twice, but passing in different config objects
+	 * populated from different JSON config blocks. This lets you e.g. have multiple Android APK
+	 * signing endpoints, each using a different key for platform APKs, per-app Play Store APKs, etc.
+	 */
 
-	/* The above will populate the following URLs:
-	/sign/Dummy -- using the provided demo/dummy SignFunc
-	/sign/AnotherDummy -- using the same code, but different config
-	/sign/MyCustomSetup -- using the config + callback pair above
-
-	Note that you can register the same handler twice, but passing in different config objects
-	populated from different JSON config blocks. This lets you e.g. have multiple Android APK
-	signing endpoints, each using a different key for platform APKs, per-app Play Store APKs, etc.
-	*/
-
-	/* Other hypothetical, currently unimiplemented examples might include:
-
-	warden.SignFunc("RSA", &signfuncs.RSAConfig{}, signfuncs.RSASignFunc)
-	warden.SignFunc("QualcommBootloader", &signfuncs.QCOMLKConfig{}, signfuncs.QCOMLKSignFunc)
-	warden.SignFunc("AndroidAPK_Platform", &signfuncs.AndroidAPKConfig{}, signfuncs.AndroidAPKSignFunc)
-	warden.SignFunc("AndroidAPK_App", &signfuncs.AndroidAPKConfig{}, signfuncs.AndroidAPKSignFunc)
-	warden.SignFunc("AndroidSystem", &signfuncs.AndroidSystemConfig{}, signfuncs.AndroidSystemSignFunc)
-
-		 These would be for, respectively, a basic RSA blob signer; a func that knows how to sign LK
-		 bootloaders for Qualcomm SoC (i.e. for Android bootloaders); two instances of an Android APK
-		 signing func, that are configured to use different keys for platform APK vs. Play Store APK; a
-		 func that knows how to sign an Android system image; etc.
-
-	   Again, note that these are not currently implemented. This is demonstrative of intended use.
-	*/
+	/* Over time the intention is to add additional signing rubrics, as need dictates. The ones
+	 * currently planned are:
+	 * - an Android system image signer
+	 * - support for PKCS11 hardware security modules (HSM)
+	 */
 
 	log.Status("signing-server", "starting up signing server")
 	log.Error("signing-server", "main loop exited unexpectedly", warden.ListenAndServe())

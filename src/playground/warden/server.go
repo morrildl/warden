@@ -235,6 +235,6 @@ func ListenAndServe() error {
 		},
 	}
 
-	log.Status("warden", "starting HTTP on port "+strconv.Itoa(cfg.Port))
+	log.Status("warden", "starting HTTPS on port "+strconv.Itoa(cfg.Port))
 	return server.ListenAndServeTLS(cfg.ServerCertFile, cfg.ServerKeyFile)
 }

@@ -312,10 +312,17 @@ You can then rename the binary and run it with a configuration file:
 
 # Recipes
 
-## Extract Keys from Java Keystore
+## Extract Keys from Existing Java Keystore
 
-    keytool -importkeystore -srckeystore ~/.android/debug.keystore -destkeystore asdf.p12 -srcstoretype JKS -deststoretype PKCS12 -destkeypass asdfgh
+    keytool -importkeystore -srckeystore current.keystore -destkeystore asdf.p12 -srcstoretype JKS -deststoretype PKCS12 -destkeypass asdfgh
     openssl pkcs12 -in asdf.p12 -nokeys -out mykey.crt
     openssl pkcs12 -in asdf.p12 -nocerts -nodes -out mykey.tmp
     openssl rsa -in mykey.tmp -out mykey.key
     rm mykey.tmp asdf.p12
+
+## Generate New Android .APK Self-Signed Signing Keys (e.g. to make a release key set)
+
+    openssl genrsa -out new.key 4096 # 4096-bit RSA
+    openssl req -new -key new.key -out new.csr -days 10950 # 30 year expiration
+    openssl x509 -in new.csr -out new.pem -req -signkey center.key -days 10950
+    rm new.csr

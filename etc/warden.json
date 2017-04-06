@@ -1,8 +1,8 @@
 {
   "Port": 9000,
   "Debug": true,
-  "ServerCertFile": "./certs/server.pem",
-  "ServerKeyFile": "./certs/server.key",
+  "ServerCertFile": "./certs/sample-server.pem",
+  "ServerKeyFile": "./certs/sample-server.key",
   "ServerLogFile": "",
   "SignersDir": "./signers",
 
@@ -27,7 +27,7 @@
       "STM32": {
         "AuthorizedKeys": [],
         "Config": {
-          "PrivateKeyPath": "./private.pem",
+          "PrivateKeyPath": "./certs/sample-rsa.pem",
           "MaxFileSize": 491520
         }
       }
@@ -38,6 +38,32 @@
         "Config": {
           "KeyPath": "/path/to/nowhere",
           "SomeSetting": 42
+        }
+      }
+    },
+    "apk": {
+      "apk-debug": {
+        "AuthorizedKeys": [],
+        "Config": {
+          "SigningKeys": [
+            { "CertPath": "./certs/sample-debug.crt",
+              "KeyPath": "./certs/sample-debug.key",
+              "Type": "RSA",
+              "Hash": "SHA256"
+            }
+          ]
+        }
+      },
+      "apk-release": {
+        "AuthorizedKeys": [],
+        "Config": {
+          "SigningKeys": [
+            { "CertPath": "./certs/sample-release.crt",
+              "KeyPath": "./certs/sample-release.key",
+              "Type": "RSA",
+              "Hash": "SHA256"
+            }
+          ]
         }
       }
     }

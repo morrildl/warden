@@ -10,7 +10,6 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 
 	"playground/log"
@@ -180,35 +179,7 @@ func (sm *SignerManager) VerifyPeerCallback(rawCerts [][]byte, verifiedChains []
 }
 
 func (sm *SignerManager) Same(left *x509.Certificate, right *x509.Certificate) bool {
-	if !reflect.DeepEqual(left.Subject, right.Subject) {
-		log.Debug("SignerManager.Same", "mismatched subjects", left.Subject.CommonName, right.Subject.CommonName)
-		return false
-	}
-
-	if left.SerialNumber.Cmp(right.SerialNumber) != 0 {
-		log.Debug("SignerManager.Same", "mismatched serial numbers", left.Subject.CommonName, right.Subject.CommonName)
-		return false
-	}
-
-	if left.SignatureAlgorithm != right.SignatureAlgorithm {
-		log.Debug("SignerManager.Same", "sig algorithm mismatch", left.Subject.CommonName, right.Subject.CommonName)
-		return false
-	}
-
-	if !bytes.Equal(left.Signature, right.Signature) {
-		log.Debug("SignerManager.Same", "signature mismatch", left.Subject.CommonName, right.Subject.CommonName)
-		return false
-	}
-
-	if left.PublicKeyAlgorithm != right.PublicKeyAlgorithm {
-		log.Debug("SignerManager.Same", "pubkey algorithm mismatch", left.Subject.CommonName, right.Subject.CommonName)
-		return false
-	}
-
-	if !reflect.DeepEqual(left.PublicKey, right.PublicKey) {
-		log.Debug("SignerManager.Same", "pubkey algorithm mismatch", left.Subject.CommonName, right.Subject.CommonName)
-		return false
-	}
-
-	return true
+	leftHash := sha256.Sum256(left.Raw)
+	rightHash := sha256.Sum256(left.Raw)
+	return bytes.Equal(leftHash[:], rightHash[:])
 }

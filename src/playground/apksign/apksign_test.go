@@ -36,11 +36,11 @@ func saveFile(name string, b []byte) error {
 var sdkapk, unsapk, rawzip []byte
 
 var keys []*SigningKey = []*SigningKey{
-	&SigningKey{
+	{
 		CertPath: "testdata/signing.crt",
-		KeyPath: "testdata/signing.key",
-		Type: RSA,
-		Hash: SHA256,
+		KeyPath:  "testdata/signing.key",
+		Type:     RSA,
+		Hash:     SHA256,
 	},
 }
 
