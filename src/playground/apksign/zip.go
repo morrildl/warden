@@ -110,7 +110,7 @@ func NewZip(buf []byte) (*Zip, error) {
 				hasSF = hasSF || strings.HasSuffix(f.FileHeader.Name, ".SF")
 				hasRSA = hasRSA || strings.HasSuffix(f.FileHeader.Name, ".RSA") || strings.HasSuffix(f.FileHeader.Name, ".DSA")
 			}
-			z.IsAPK = hasClassesDex && hasAndroidManifestXML && hasResourcesARSC && hasManifest
+			z.IsAPK = hasClassesDex && hasAndroidManifestXML && hasResourcesARSC
 			z.IsV1Signed = hasManifest && (hasSF || hasRSA) // doesn't mean it validates...
 
 			// now see if there is an Android signing v2 block
@@ -151,6 +151,10 @@ func (z *Zip) VerifyV1() error {
 	var r *V1Reader
 	var err error
 
+	if !z.IsV1Signed {
+		return errors.New("v1 verification attempted on non-v1-signed file")
+	}
+
 	if r, err = ParseZip(z.raw, nil); err != nil {
 		return err
 	}
@@ -161,6 +165,10 @@ func (z *Zip) VerifyV1() error {
 func (z *Zip) VerifyV2() error {
 	var v2 *V2Block
 	var err error
+
+	if !z.IsV2Signed {
+		return errors.New("v2 verification attempted on non-v2-signed file")
+	}
 
 	v2, err = ParseV2Block(z.rawASv2)
 	if err != nil {
@@ -290,5 +298,11 @@ func (z *Zip) InjectBeforeCD(data []byte) []byte {
 	copy(ret[endOfFilesSection+uint64(len(data)):], z.raw[z.cdOffset:z.eocdOffset])
 	copy(ret[endOfFilesSection+uint64(len(data))+(z.eocdOffset-z.cdOffset):], newEocd)
 
+	return ret
+}
+
+func (z *Zip) Bytes() []byte {
+	ret := make([]byte, len(z.raw))
+	copy(ret, z.raw)
 	return ret
 }

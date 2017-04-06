@@ -317,5 +317,5 @@ You can then rename the binary and run it with a configuration file:
     keytool -importkeystore -srckeystore ~/.android/debug.keystore -destkeystore asdf.p12 -srcstoretype JKS -deststoretype PKCS12 -destkeypass asdfgh
     openssl pkcs12 -in asdf.p12 -nokeys -out mykey.crt
     openssl pkcs12 -in asdf.p12 -nocerts -nodes -out mykey.tmp
-    openssl rsa -in mykey.tmp -out mykey.crt
+    openssl rsa -in mykey.tmp -out mykey.key
     rm mykey.tmp asdf.p12
