@@ -47,9 +47,10 @@ The default config file in `etc/warden.json` uses a directory named `./signers` 
 client certificates. You'll need to create a first cert to test with:
 
     openssl genrsa -out ~/client.key 4096 # generate a 4096-bit RSA private key
-    openssl req -new -key new.key -out ~/client.csr -days 3650 # generate a certificate signing request
+    openssl req -new -key ~/client.key -out ~/client.csr -days 3650 # generate a certificate signing request
     openssl x509 -in ~/client.csr -out ~/client.pem -req -signkey ~/client.key -days 3650 # self-sign the cert
     rm ~/client.csr
+    mkdir ./signers
     cp ~/client.pem ./signers
 
 Note that the example config has the server using a certificate generated in `./certs/`; naturally
@@ -60,7 +61,7 @@ generating the CSR in the second step.
 Once running, you can use `curl` to experiment with signing APK files using the provided sample
 keys:
 
-    curl -E ~/client.pem --key ~/client.key -k --data-binary @~/someapp.apk -o someapp-signed.apk -s https://${YOUR_SERVER}:9000/sign/apk-debug
+    curl -E ~/client.pem --key ~/client.key -k --data-binary @someapp.apk -o someapp-signed.apk -s https://localhost:9000/sign/apk-debug
 
 Again, obviously don't use these in production.
 
