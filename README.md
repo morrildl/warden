@@ -76,8 +76,11 @@ Small organizations or organizations with few products can simply whitelist all 
 to sign (such as a build server, and small number of build engineers.) But organizations that wish
 to have more granular control can configure Warden to restrict specific endpoints to specific clients.
 
-For instance, all whitelisted client certs could be permitted to sign using a debug key for daily
-builds, while access to the key for production builds is restricted to a single client.
+For instance, you could allow any whitelisted client to sign binaries with a debug/test key, while
+signing with a release key is restricted to specific clients. In this way, your build server could
+be configured with 2 client access certificates: one without a local password that can thus be used
+for routine signatures (such as for continuous builds), and another with a password-protected
+certificate whose password is known only to a small number of individuals.
 
 ### Compatible Certificates
 
@@ -116,15 +119,15 @@ thus would be immediately obvious, but there is a possible risk of data theft th
 code you write -- such as a plugin for your CI software -- should inspect the server certificate to
 verify it has the fingerprint you expect.*
 
-Alternatively, you can manually copy a `.pem` (public-key) certificate into the directory you
-configured Warden to use as your client whitelist. In fact, you'll naturally need to do exactly this
-for the first client you want to whitelist.
-
 If you wish to view the list of currently-authorized client certificates, you can issue an
 unqualified `GET /signers` request, which will return a concatenation of all authorized PEM files --
 essentially the contents of the `signers` directory in configuration.
 
 Once the HTTPS request completes, the new certificate can immediately begin using the server.
+
+Alternatively, you can manually copy a `.pem` (public-key) certificate into the directory you
+configured Warden to use as your client whitelist. In fact, you'll naturally need to do exactly this
+for the first client you want to whitelist.
 
 ### Revoking Clients from the Whitelist
 
@@ -132,7 +135,7 @@ To remove a client certificate's access, make the following REST request: `DELET
 payload of the complete PEM-encoded certificate you wish to delete. The reason the full certificate
 is required is to prevent ambiguity: it is possible to issue a certificate with the same subject,
 serial number, etc. The only thing Warden cares about is essentially the public key fingerprint, but
-ultimately it needs to full certificate to unambiguously de-whitelist clients.
+ultimately it needs the full certificate to unambiguously de-whitelist clients.
 
 Note again that you can fetch a list of all certificates via a `GET` request, as above. So if you need to
 urgently de-whitelist a certificate that you don't have handy, you can simply fetch them from the
@@ -150,15 +153,15 @@ If you need to inspect the current whitelist:
 
 This will let you identify which cert PEM you need to upload to de-whitelist the client.
 
-As with adding new certificates, you can, naturally, also revoke a certificate by simply deleting
-the appropriate `.pem` file from the Warden server.
-
 Once the HTTPS request completes, requests by the deleted certificate will immediately be rejected
 by the server.
 
+As with adding new certificates, you can, naturally, also revoke a certificate by simply deleting
+the appropriate `.pem` file from the Warden server.
+
 ### Granting and Removing Access to Specific Endpoints
 
-The seconds above manage the first layer of authentication, the TLS certificate whitelist. If you
+The commands above manage the first layer of authentication, the TLS certificate whitelist. If you
 wish to make use of Warden's second layer of authorization -- the `AuthorizedKeys` list for each
 endpoint -- then you will currently need to edit the JSON configuration file.
 
@@ -200,8 +203,8 @@ hook code in `src/main/default.go`:
 {
   "Port": 9000,
   "Debug": true,
-  "ServerCertFile": "./certs/server.pem",
-  "ServerKeyFile": "./certs/server.key",
+  "ServerCertFile": "./certs/sample-server.pem",
+  "ServerKeyFile": "./certs/sample-server.key",
   "ServerLogFile": "",
   "SignersDir": "./signers",
 
@@ -226,7 +229,7 @@ hook code in `src/main/default.go`:
       "STM32": {
         "AuthorizedKeys": [],
         "Config": {
-          "PrivateKeyPath": "./private.pem",
+          "PrivateKeyPath": "./certs/sample-rsa.pem",
           "MaxFileSize": 491520
         }
       }
@@ -237,6 +240,32 @@ hook code in `src/main/default.go`:
         "Config": {
           "KeyPath": "/path/to/nowhere",
           "SomeSetting": 42
+        }
+      }
+    },
+    "apk": {
+      "apk-debug": {
+        "AuthorizedKeys": [],
+        "Config": {
+          "SigningKeys": [
+            { "CertPath": "./certs/sample-debug.crt",
+              "KeyPath": "./certs/sample-debug.key",
+              "Type": "RSA",
+              "Hash": "SHA256"
+            }
+          ]
+        }
+      },
+      "apk-release": {
+        "AuthorizedKeys": [],
+        "Config": {
+          "SigningKeys": [
+            { "CertPath": "./certs/sample-release.crt",
+              "KeyPath": "./certs/sample-release.key",
+              "Type": "RSA",
+              "Hash": "SHA256"
+            }
+          ]
         }
       }
     }
@@ -254,23 +283,32 @@ First, the general server configuration parameters:
 * `SignersDir` is the path to the directory containing `.pem` client cert files that are whitelisted
 
 The `"Handlers"` block configures instances of signing scheme endpoints. In the example above, there
-are 4 such endpoints configured:
+are 6 such endpoints configured:
 
 * `/sign/Dummy` -- uses the sample/dummy no-op signing scheme included with Warden
 * `/sign/AnotherDummy` -- a second instance of the same scheme, with different config values
 * `/sign/MyCustomSetup` -- another no-op example included in `src/main/default.go` as an example of custom schemes
 * `/sign/STM32` -- an instance of the (real, working) STM32 microcontroller image signing scheme
+* `/sign/apk-debug` & `/sign/apk-release` -- two (real, working) endpoints for signing Android APKs using different keys
 
 The `Dummy` endpoint is configured to restrict signing to a particular certificate, via the
 `AuthorizedKeys` field; the others have no such restriction.
 
+Note the hierarchy: the two Android configurations are under a `"apk"` entry in the `"Handlers"`
+object. Similarly, the two dummy configurations are under a `"demo"` entry. This top-level entry
+specifies the specific `SignFunc` to use: the implementations in the code register themselves under
+these names. That is, `"apk"` refers to the `SignFunc` in `src/playground/warden/signfuncs/APK.go`,
+while `"demo"` refers to `src/playground/warden/signfuncs/dummy.go`, and so on.
+
 Within each named block are additional configuration fields. These fields vary by signing scheme,
-but in general you can expect each scheme to require at least the past to a private key file -- for
-example, the `"PrivateKeyPath"` parameter to the `/sign/STM32` endpoint.
+but in general you can expect each scheme to require at least the path to a private key file -- for
+example, the `"PrivateKeyPath"` parameter to the `/sign/STM32` endpoint. On the other hand, the
+Android APK signing scheme configuration requires additional parameters indicating algorithms for
+signature and digest.
 
 Note again that you can have multiple instances of the same signing scheme, with different config
 options. This allows you to configure multiple endpoints that sign the same kind of binary, but
-using a different key. For instance, you can have 2 Andorid `.APK` endpoints, one configured with
+using a different key. An example is the two Android `.APK` endpoints, one configured with
 your Android platform key that you use to sign core preloaded apps, and another configured with your
 app key that you use for apps you publish to Play Store.
 
@@ -312,7 +350,32 @@ You can then rename the binary and run it with a configuration file:
 
 # Recipes
 
+Here are some handy commands illustrating how to perform common operations.
+
+## Generate Client Access Certificate
+
+To generate a new client TLS cert to use with the Warden whitelist:
+
+    openssl genrsa -out new.key 2048 # generate a 2048-bit RSA private key
+    openssl req -new -key new.key -out new.csr -days 3650 # generate a certificate signing request
+    openssl x509 -in new.csr -out new.pem -req -signkey center.key -days 3650 # self-sign the cert
+    rm new.csr # certificate signing request not needed once cert is generated
+ 
+(This is copied from above.)
+
+## Compute Certificate Fingerprint for Use in ACL
+
+If you have a certificate that you want to add to a level-2 ACL entry in Warden configuration, you
+can obtain it like this:
+
+    openssl x509 -sha256 -fingerprint -noout -in certificate.pem
+
+You can then copy the resulting fingerprint string into `warden.json`.
+
 ## Extract Keys from Existing Java Keystore
+
+If you have an existing Java keystore file containing keys you would like to use with Warden, you
+can extract them and convert them to PEM-encoded DER/ASN.1 x.509 certificates like this:
 
     keytool -importkeystore -srckeystore current.keystore -destkeystore asdf.p12 -srcstoretype JKS -deststoretype PKCS12 -destkeypass asdfgh
     openssl pkcs12 -in asdf.p12 -nokeys -out mykey.crt
@@ -320,9 +383,115 @@ You can then rename the binary and run it with a configuration file:
     openssl rsa -in mykey.tmp -out mykey.key
     rm mykey.tmp asdf.p12
 
-## Generate New Android .APK Self-Signed Signing Keys (e.g. to make a release key set)
+The certificate will be in `mykey.crt` and the private key in `mykey.key`.
+
+If you want the converted certificate private key to be password-protected, omit the `-nodes` option
+to the third command.
+
+You would use this recipe if you have an existing Android Studio-generated keystore that you've
+previously used to sign a debug (or even release) build that you want to migrate to Warden.
+
+## Generate New Android .APK Self-Signed Signing Keys
+
+If you want to generate new signing keys suitable for use with Android APK files, you can do so like
+this:
 
     openssl genrsa -out new.key 4096 # 4096-bit RSA
     openssl req -new -key new.key -out new.csr -days 10950 # 30 year expiration
     openssl x509 -in new.csr -out new.pem -req -signkey center.key -days 10950
     rm new.csr
+
+You would use this recipe if you want to generate fresh Android app signing keys, such as for a
+production release build.
+
+## Production Android APK Signing Config
+
+A typical configuration file set up to sign binaries for a single Android device will look something
+like this:
+
+    {
+      "Port": 9000,
+      "Debug": false,
+      "ServerCertFile": "/opt/private/server/server.pem",
+      "ServerKeyFile": "/opt/private/server/server.key",
+      "ServerLogFile": "/opt/private/warden.log",
+      "SignersDir": "/opt/private/signers",
+
+      "Handlers": {
+        "apk": {
+          "test": {
+            "AuthorizedKeys": [],
+            "Config": {
+              "SigningKeys": [
+                { "CertPath": "/opt/private/signing-keys/test.crt",
+                  "KeyPath": "/opt/private/signing-keys/test.key",
+                  "Type": "RSA",
+                  "Hash": "SHA256"
+                }
+              ]
+            }
+          },
+          "system-media": {
+            "AuthorizedKeys": [],
+            "Config": {
+              "SigningKeys": [
+                { "CertPath": "/opt/private/signing-keys/media.crt",
+                  "KeyPath": "/opt/private/signing-keys/media.key",
+                  "Type": "RSA",
+                  "Hash": "SHA256"
+                }
+              ]
+            }
+          },
+          "system-platform": {
+            "AuthorizedKeys": [],
+            "Config": {
+              "SigningKeys": [
+                { "CertPath": "/opt/private/signing-keys/platform.crt",
+                  "KeyPath": "/opt/private/signing-keys/platform.key",
+                  "Type": "RSA",
+                  "Hash": "SHA256"
+                }
+              ]
+            }
+          },
+          "system-shared": {
+            "AuthorizedKeys": [],
+            "Config": {
+              "SigningKeys": [
+                { "CertPath": "/opt/private/signing-keys/shared.crt",
+                  "KeyPath": "/opt/private/signing-keys/shared.key",
+                  "Type": "RSA",
+                  "Hash": "SHA256"
+                }
+              ]
+            }
+          },
+          "playstore-app": {
+            "AuthorizedKeys": [],
+            "Config": {
+              "SigningKeys": [
+                { "CertPath": "/opt/private/signing-keys/playstore.crt",
+                  "KeyPath": "/opt/private/signing-keys/playstore.key",
+                  "Type": "RSA",
+                  "Hash": "SHA256"
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+
+An Android system image uses multiple certs and keys to sign the APKs within the image. These
+include a "test-keys" key used for debug builds (e.g. for continuous integration builds), and then 3
+different keys for different classes of system APKs (media, platform, and shared.) Typically you use
+different sets of these 4 keys for each device, although the example above only has a single set.
+You can easily expand the list with more signing keys, however, to support multiple devices.
+
+The example also has an additional entry, "playstore-app". This would be for an APK that you upload
+to Google Play Store, that you don't necessarily preload (although you could also preload it.) Such
+APKs should not reuse any of the system keys. An example here would be a UI app controlling a companion
+gadget you also produce, a data migration app, and so on. These are distinct from the core system
+apps, such as the low-level media player, and so on.
+
