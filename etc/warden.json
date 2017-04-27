@@ -7,19 +7,12 @@
   "SignersDir": "./signers",
 
   "Handlers": {
-    "demo": {
-      "Dummy": {
-        "AuthorizedKeys": ["2A:1D:2F:76:A6:36:FE:88:3D:75:14:3B:A5:3C:04:3B:12:FF:91:3D:87:46:AE:9A:6B:23:13:B5:FF:07:08:36"],
+    "custom": {
+      "MyCustomSetup": {
+        "AuthorizedCerts": [],
         "Config": {
-          "Hello": "hello i am Dumy",
-          "Invert": false
-        }
-      },
-      "AnotherDummy": {
-        "AuthorizedKeys": [],
-        "Config": {
-          "Hello": "i am also Dmmy to",
-          "Invert": true
+          "KeyPath": "/path/to/nowhere",
+          "SomeSetting": 42
         }
       }
     },
@@ -32,20 +25,11 @@
         }
       }
     },
-    "custom": {
-      "MyCustomSetup": {
-        "AuthorizedKeys": [],
-        "Config": {
-          "KeyPath": "/path/to/nowhere",
-          "SomeSetting": 42
-        }
-      }
-    },
     "apk": {
       "apk-debug": {
         "AuthorizedKeys": [],
         "Config": {
-          "SigningKeys": [
+          "SigningCerts": [
             { "CertPath": "./certs/sample-debug.crt",
               "KeyPath": "./certs/sample-debug.key",
               "Type": "RSA",
@@ -57,13 +41,83 @@
       "apk-release": {
         "AuthorizedKeys": [],
         "Config": {
-          "SigningKeys": [
+          "SigningCerts": [
             { "CertPath": "./certs/sample-release.crt",
               "KeyPath": "./certs/sample-release.key",
               "Type": "RSA",
               "Hash": "SHA256"
             }
           ]
+        }
+      }
+    },
+    "android_boot": {
+      "sailfish-dev-boot": {
+        "AuthorizedKeys": [],
+        "Config": {
+          "SigningCert": {
+            "CertPath": "./certs/sample-debug.crt",
+            "KeyPath": "./certs/sample-debug.key",
+            "Type": "RSA",
+            "Hash": "SHA256"
+          },
+          "Target": "/boot"
+        }
+      },
+      "sailfish-prod-boot": {
+        "AuthorizedKeys": ["2A:1D:2F:76:A6:36:FE:88:3D:75:14:3B:A5:3C:04:3B:12:FF:91:3D:87:46:AE:9A:6B:23:13:B5:FF:07:08:36"],
+        "Config": {
+          "SigningCert": {
+            "CertPath": "./certs/sample-release.crt",
+            "KeyPath": "./certs/sample-release.key",
+            "Type": "RSA",
+            "Hash": "SHA256"
+          },
+          "Target": "/boot"
+        }
+      }
+    },
+    "android_verity": {
+      "sailfish-dev-verity": {
+        "AuthorizedKeys": [],
+        "Config": {
+          "SigningKey": {
+            "KeyPath": "./certs/sample-debug.key",
+            "Type": "RSA",
+            "Hash": "SHA256"
+          }
+        }
+      },
+      "sailfish-prod-verity": {
+        "AuthorizedKeys": ["2A:1D:2F:76:A6:36:FE:88:3D:75:14:3B:A5:3C:04:3B:12:FF:91:3D:87:46:AE:9A:6B:23:13:B5:FF:07:08:36"],
+        "Config": {
+          "SigningKey": {
+            "KeyPath": "./certs/sample-release.key",
+            "Type": "RSA",
+            "Hash": "SHA256"
+          }
+        }
+      }
+    },
+    "android_payload": {
+      "sailfish-dev-payload": {
+        "AuthorizedKeys": [],
+        "Config": {
+          "SigningKey": {
+            "KeyPath": "./certs/sample-debug.key",
+            "Type": "RSA",
+            "Hash": "SHA256"
+          }
+        }
+      },
+      "sailfish-prod-payload": {
+        "AuthorizedKeys": ["2A:1D:2F:76:A6:36:FE:88:3D:75:14:3B:A5:3C:04:3B:12:FF:91:3D:87:46:AE:9A:6B:23:13:B5:FF:07:08:36"],
+        "Config": {
+          "SigningKey": {
+            "KeyPath": "./certs/sample-release.key",
+            "Type": "RSA",
+            "Hash": "SHA256"
+          }
         }
       }
     }

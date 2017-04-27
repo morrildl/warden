@@ -1,13 +1,14 @@
 package signfuncs
 
 import (
-	"playground/apksign"
+	"playground/android"
+	"playground/android/apksign"
 	"playground/log"
 	"playground/warden"
 )
 
 type APKConfig struct {
-	SigningKeys []*apksign.SigningKey
+	SigningCerts []*android.SigningCert
 }
 
 func APKSignFunc(config interface{}, req *warden.SigningRequest) (code int, ctype string, response []byte) {
@@ -28,7 +29,7 @@ func APKSignFunc(config interface{}, req *warden.SigningRequest) (code int, ctyp
 		log.Warn("signfuncs.APKSignFunc", "error parsing APK zip", err)
 		return 400, "text/plain", []byte("error parsing APK zip: " + err.Error())
 	}
-	if z, err = z.Sign(cfg.SigningKeys); err != nil {
+	if z, err = z.Sign(cfg.SigningCerts); err != nil {
 		log.Warn("signfuncs.APKSignFunc", "error signing APK zip", err)
 		return 500, "text/plain", []byte("error signing APK zip: " + err.Error())
 	}

@@ -9,6 +9,7 @@ certificates for specific client machines -- such as your build server -- that a
 request signatures for binaries.
 
 This provides the following advantages:
+
 * If your build server is hacked, it doesn't expose the private key you use to sign binaries
 * You have logs of what binaries got signed when, by which user, for auditing and forensic purposes
 * You can revoke authorization to sign binaries by simply removing the cert from the whitelist
@@ -199,79 +200,77 @@ schemes.
 Here is the sample configuration file from the source tree, which corresponds to the server entry
 hook code in `src/main/default.go`:
 
-```
-{
-  "Port": 9000,
-  "Debug": true,
-  "ServerCertFile": "./certs/sample-server.pem",
-  "ServerKeyFile": "./certs/sample-server.key",
-  "ServerLogFile": "",
-  "SignersDir": "./signers",
+    {
+      "Port": 9000,
+      "Debug": true,
+      "ServerCertFile": "./certs/sample-server.pem",
+      "ServerKeyFile": "./certs/sample-server.key",
+      "ServerLogFile": "",
+      "SignersDir": "./signers",
 
-  "Handlers": {
-    "demo": {
-      "Dummy": {
-        "AuthorizedKeys": ["2A:1D:2F:76:A6:36:FE:88:3D:75:14:3B:A5:3C:04:3B:12:FF:91:3D:87:46:AE:9A:6B:23:13:B5:FF:07:08:36"],
-        "Config": {
-          "Hello": "hello i am Dumy",
-          "Invert": false
-        }
-      },
-      "AnotherDummy": {
-        "AuthorizedKeys": [],
-        "Config": {
-          "Hello": "i am also Dmmy to",
-          "Invert": true
-        }
-      }
-    },
-    "stm32": {
-      "STM32": {
-        "AuthorizedKeys": [],
-        "Config": {
-          "PrivateKeyPath": "./certs/sample-rsa.pem",
-          "MaxFileSize": 491520
-        }
-      }
-    },
-    "custom": {
-      "MyCustomSetup": {
-        "AuthorizedKeys": [],
-        "Config": {
-          "KeyPath": "/path/to/nowhere",
-          "SomeSetting": 42
-        }
-      }
-    },
-    "apk": {
-      "apk-debug": {
-        "AuthorizedKeys": [],
-        "Config": {
-          "SigningKeys": [
-            { "CertPath": "./certs/sample-debug.crt",
-              "KeyPath": "./certs/sample-debug.key",
-              "Type": "RSA",
-              "Hash": "SHA256"
+      "Handlers": {
+        "demo": {
+          "Dummy": {
+            "AuthorizedKeys": ["2A:1D:2F:76:A6:36:FE:88:3D:75:14:3B:A5:3C:04:3B:12:FF:91:3D:87:46:AE:9A:6B:23:13:B5:FF:07:08:36"],
+            "Config": {
+              "Hello": "hello i am Dumy",
+              "Invert": false
             }
-          ]
-        }
-      },
-      "apk-release": {
-        "AuthorizedKeys": [],
-        "Config": {
-          "SigningKeys": [
-            { "CertPath": "./certs/sample-release.crt",
-              "KeyPath": "./certs/sample-release.key",
-              "Type": "RSA",
-              "Hash": "SHA256"
+          },
+          "AnotherDummy": {
+            "AuthorizedKeys": [],
+            "Config": {
+              "Hello": "i am also Dmmy to",
+              "Invert": true
             }
-          ]
+          }
+        },
+        "stm32": {
+          "STM32": {
+            "AuthorizedKeys": [],
+            "Config": {
+              "PrivateKeyPath": "./certs/sample-rsa.pem",
+              "MaxFileSize": 491520
+            }
+          }
+        },
+        "custom": {
+          "MyCustomSetup": {
+            "AuthorizedKeys": [],
+            "Config": {
+              "KeyPath": "/path/to/nowhere",
+              "SomeSetting": 42
+            }
+          }
+        },
+        "apk": {
+          "apk-debug": {
+            "AuthorizedKeys": [],
+            "Config": {
+              "SigningKeys": [
+                { "CertPath": "./certs/sample-debug.crt",
+                  "KeyPath": "./certs/sample-debug.key",
+                  "Type": "RSA",
+                  "Hash": "SHA256"
+                }
+              ]
+            }
+          },
+          "apk-release": {
+            "AuthorizedKeys": [],
+            "Config": {
+              "SigningKeys": [
+                { "CertPath": "./certs/sample-release.crt",
+                  "KeyPath": "./certs/sample-release.key",
+                  "Type": "RSA",
+                  "Hash": "SHA256"
+                }
+              ]
+            }
+          }
         }
       }
     }
-  }
-}
-```
 
 First, the general server configuration parameters:
 

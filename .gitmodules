@@ -11,6 +11,6 @@
 [submodule "src/vendor/github.com/fullsailor/pkcs7"]
 	path = src/vendor/github.com/fullsailor/pkcs7
 	url = https://github.com/fullsailor/pkcs7
-[submodule "src/vendor/playground/apksign"]
-	path = src/vendor/playground/apksign
+[submodule "src/vendor/playground/android"]
+	path = src/vendor/playground/android
 	url = ssh://code.playground.global:29418/studio/playground/apksign
