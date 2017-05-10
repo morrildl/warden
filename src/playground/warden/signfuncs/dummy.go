@@ -7,11 +7,14 @@ import (
 	"playground/warden"
 )
 
+// DemoConfig is a trivial configuration struct for DemoSignFunc.
 type DemoConfig struct {
 	Hello  string
 	Invert bool
 }
 
+// DemoSignFunc is a very simple, sample SignFunc that returns its input, possibly binary-NOTed
+// based on the value of the Invert field of its config struct.
 func DemoSignFunc(config interface{}, req *warden.SigningRequest) (code int, ctype string, response []byte) {
 	code, ctype, response = 500, "text/plain", []byte("panic in DemoSignHandler")
 	defer func() {

@@ -1,5 +1,8 @@
 package main
 
+/* A simple utility demonstrating how to generate a Warden server certificate that will work with
+ * gratuitously pedantic clients, such as Java. */
+
 import (
 	"crypto/rand"
 	"crypto/rsa"
@@ -23,11 +26,14 @@ func main() {
 
 	template.NotBefore = time.Now()
 	template.NotAfter = template.NotBefore.Add(15 * 365 * 24 * time.Hour)
-	template.KeyUsage = x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign
 	template.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}
 	template.IsCA = false
 	template.BasicConstraintsValid = true
 	template.DNSNames = []string{"*", "*.*", "*.*.*"}
+
+	// these three key usage values are the critical element; Java in particular wants KeyUsageCertSign
+	// or else it won't accept a self-signed cert
+	template.KeyUsage = x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign
 
 	priv, err := rsa.GenerateKey(rand.Reader, 4096)
 	if err != nil {

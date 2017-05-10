@@ -11,12 +11,14 @@ type AndroidBootConfig struct {
 	SigningCert *android.SigningCert
 }
 
+// AndroidBootSignFunc signs an Android/Linux boot partition using the Android verified-boot spec.
+// See the playground/android/otasign package for details.
 func AndroidBootSignFunc(config interface{}, req *warden.SigningRequest) (code int, ctype string, response []byte) {
 	// catch-all in case of a panic
 	code, ctype, response = 500, "text/plain", []byte("panic in APKSignFunc")
 	defer func() {
 		if r := recover(); r != nil {
-			log.Error("signfuncs.APKSignFunc", "paniced during execution", r)
+			log.Error("signfuncs.APKSignFunc", "panic during execution", r)
 		}
 	}()
 
@@ -63,10 +65,14 @@ type RSAConfig struct {
 	SigningKey *android.SigningKey
 }
 
+// RSASignPrehashedFunc signs its input, which must be a SHA256 hash of the input (or at least be 32
+// bytes long), and returns the PKCS#1v1.5 signature of it. It differs from RSASignFunc in that the
+// latter will hash its input before signing.
 func RSASignPrehashedFunc(config interface{}, req *warden.SigningRequest) (code int, ctype string, response []byte) {
 	return doRSASignFunc(config, req, true)
 }
 
+// RSASignPrehashedFunc returns the PKCS#1v1.5 signature of its input.
 func RSASignFunc(config interface{}, req *warden.SigningRequest) (code int, ctype string, response []byte) {
 	return doRSASignFunc(config, req, false)
 }

@@ -8,16 +8,19 @@ import (
 	_ "playground/warden/signfuncs" // unbound import for side effects (see signfuncs/init.go)
 )
 
+/* MyCustomConfig is the configuration object used by MyCustomFunc and populated via JSON. */
 type MyCustomConfig struct {
 	KeyPath     string
 	SomeSetting int
 }
 
+/* MyCustomFunc is a demo SignFunc. It does nothing useful, and is merely an illustration of the
+ * API. */
 func MyCustomFunc(config interface{}, req *warden.SigningRequest) (code int, ctype string, response []byte) {
 	code, ctype, response = 500, "text/plain", []byte("panic in MyCustomFunc")
 	defer func() {
 		if r := recover(); r != nil {
-			log.Error("MyCustomFunc", "paniced during execution", r)
+			log.Error("MyCustomFunc", "panic during execution", r)
 		}
 	}()
 
@@ -47,8 +50,7 @@ func main() {
 	 * warden.SignFunc("apk-release", &signfuncs.APKConfig{}, signfuncs.APKSignFunc)
 	 * warden.SignFunc("MyCustomSetup", &MyCustomConfig{}, MyCustomFunc)
 	 *
-	 * The code above (which is equivalent to the example config file in `etc/warden-config.json`)
-	 * results in these endpoints available via HTTPS/REST:
+	 * The code above results in these endpoints available via HTTPS/REST:
 	 *
 	 * /sign/Dummy -- using the provided demo/dummy SignFunc
 	 * /sign/AnotherDummy -- using the same code, but different config
@@ -63,7 +65,7 @@ func main() {
 
 	/* Over time the intention is to add additional signing rubrics, as need dictates. The ones
 	 * currently planned are:
-	 * - an Android system image signer
+	 * - an Android legacy system image signer (modern A/B signing currently supported)
 	 * - support for PKCS11 hardware security modules (HSM)
 	 */
 

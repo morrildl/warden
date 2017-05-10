@@ -10,6 +10,11 @@ import (
 	"time"
 )
 
+// SigningRequest contains all data necessary for a SignFunc to process a signing request from a
+// client.
+//
+// Note that CertSubject is a short-hand representation of the X.509 cert subject; do not use for
+// identity comparisons.
 type SigningRequest struct {
 	When            time.Time
 	IP              string
@@ -20,6 +25,8 @@ type SigningRequest struct {
 	Params          map[string]string
 }
 
+// NewSigningRequestFrom returns a new SigningRequest populated from data sent by client in the HTTP
+// request.
 func NewSigningRequestFrom(req *http.Request) (*SigningRequest, error) {
 	ip := req.Header.Get("X-Forwarded-For") // if request came from a proxy
 	if ip == "" {

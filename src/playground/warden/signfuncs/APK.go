@@ -11,6 +11,8 @@ type APKConfig struct {
 	SigningCerts []*android.SigningCert
 }
 
+// APKSignFunc signs an Android APK (app) Zip file via both the v1 and v2 Android signing schemes.
+// See the playground/android/apksign package for details.
 func APKSignFunc(config interface{}, req *warden.SigningRequest) (code int, ctype string, response []byte) {
 	// catch-all in case of a panic
 	code, ctype, response = 500, "text/plain", []byte("panic in APKSignFunc")

@@ -7,7 +7,6 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/pem"
-	"fmt"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -21,7 +20,8 @@ type STM32Config struct {
 	PrivateKeyPath string
 }
 
-// STM32SignFunc signs the indicated blog according to <insert STM reference here>
+// STM32SignFunc signs a blob under the STM32 microcontroller's scheme. This code was constructed
+// based on the observed behavior of a sample bash script, so no reference is available to cite.
 func STM32SignFunc(config interface{}, req *warden.SigningRequest) (code int, ctype string, response []byte) {
 	// catch-all in case of a panic
 	code, ctype, response = 500, "text/plain", []byte("panic in DemoSignHandler")
@@ -106,8 +106,5 @@ func STM32SignFunc(config interface{}, req *warden.SigningRequest) (code int, ct
 	}
 
 	// return the relevant slice
-	log.Status("signfuncs.STM32SignFunc",
-		fmt.Sprintf("signed payload '%s' for '%s' at '%s'",
-			req.PayloadSHA256, req.CertSubject, req.When.UTC().Format("2006-01-02T15:04:05-0700")))
 	return 200, "application/octet-stream", out[0 : inputSize+len(sig)]
 }

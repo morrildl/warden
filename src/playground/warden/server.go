@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/tls"
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"net/http"
 	"regexp"
@@ -15,6 +16,9 @@ import (
 	"playground/log"
 )
 
+/*
+ * Configuration objects to pass to JSON
+ */
 type signerType struct {
 	AuthorizedKeys []string
 	Config         json.RawMessage
@@ -40,6 +44,10 @@ var cfg configType = configType{
 	make(map[string]map[string]*signerType),
 }
 
+/*
+ * 2-level map that stores client certificate authorizations to specific signing endpoints, when
+ * those endpoints specify an ACL/whitelist
+ */
 var authMap map[string]map[string]bool = make(map[string]map[string]bool)
 var authRE *regexp.Regexp = regexp.MustCompile(`[^a-fA-F0-9]`)
 
@@ -107,6 +115,9 @@ func recoverAndError(writer http.ResponseWriter) {
 	}
 }
 
+/*
+ * a structure to handle the final, configured list of active signing functions
+ */
 type signHandler struct {
 	name    string
 	config  interface{}
@@ -115,10 +126,21 @@ type signHandler struct {
 
 var signHandlers map[string]*signHandler = make(map[string]*signHandler)
 
+// SignFunc registers a new signing function callback under the indicated URL endpoint path. This
+// function emulates the http.HandleFunc model. Upon a client request to the URL path denoted in
+// `name`, the handler function is invoked with a SigningRequest instance containing the payload to
+// be signed and various metadata.
+//
+// The handler func returns a triple of HTTP response code, the content-type of the signed bytes to
+// use in the HTTPS response, and the signed bytes (or a string containing an error message, for
+// non-200-series response codes.)
 func SignFunc(name string, config interface{}, handler func(config interface{}, req *SigningRequest) (int, string, []byte)) {
 	signHandlers[name] = &signHandler{name, config, handler}
 }
 
+// ListenAndServe starts a Warden server instance, which configures itself from the JSON config
+// file. No pre-configuration in code is required, although code may optionally call SignFunc to add
+// one or more custom signing functions.
 func ListenAndServe() error {
 	initConfig()
 
@@ -223,6 +245,14 @@ func ListenAndServe() error {
 		}
 
 		resCode, contentType, body := handler.handler(handler.config, sreq)
+
+		if resCode < 300 {
+			// log all successful signing operations
+			log.Status("SIGNATURE",
+				fmt.Sprintf("signed payload '%s' via '%s' for '%s' at '%s'",
+					sreq.PayloadSHA256, name, sreq.CertSubject, sreq.When.UTC().Format("2006-01-02T15:04:05-0700")))
+		}
+
 		httputil.Send(writer, resCode, contentType, body)
 	})
 

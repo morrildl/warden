@@ -1,3 +1,4 @@
+// Package warden contains the HTTPS server core of the Warden signing server.
 package warden
 
 import (
@@ -15,23 +16,34 @@ import (
 	"playground/log"
 )
 
+// Handler is a representation of a SignFunc implementation and its corresponding config object.
+// Used by the bundled SignFuncs to auto-register themselves with Warden. Custom non-bundled
+// SignFuncs -- i.e. those not in package playground/warden/signfuncs -- register themselves
+// directly and don't need to use this type, nor the Registry.
 type Handler struct {
 	Config   interface{}
 	SignFunc func(interface{}, *SigningRequest) (int, string, []byte)
 }
 
+// Registry is a map of all registered SignFuncs (via Handler instances), keyed by the logical
+// names by which they are referenced in the config JSON.
 var Registry map[string](func() *Handler) = make(map[string](func() *Handler))
 
-type signer struct {
+// Signer represents an authorized signer whose certificate is present in the signers directory
+// specified by JSON config.
+type Signer struct {
 	path string
 	cert *x509.Certificate
 	pem  []byte
 }
 
+// SignerManager provides access to fetch and update the list of TLS certificates approved to access
+// a Warden server.
 type SignerManager struct {
 	SignersDir string
 }
 
+// GetSignersDir returns the directory where signers are specified, per the config JSON.
 func (sm *SignerManager) GetSignersDir() *os.File {
 	fi, err := os.Stat(sm.SignersDir)
 	if err != nil {
@@ -47,7 +59,9 @@ func (sm *SignerManager) GetSignersDir() *os.File {
 	return f
 }
 
-func (sm *SignerManager) GetSigners() []signer {
+// GetSigners returns a list of all signers currently authorized by virtue of having their certs
+// located in the directory specified in config. The list will be empty if there are no signers.
+func (sm *SignerManager) GetSigners() []Signer {
 	dir := sm.GetSignersDir()
 	defer dir.Close()
 
@@ -56,7 +70,7 @@ func (sm *SignerManager) GetSigners() []signer {
 		panic(err)
 	}
 
-	ret := []signer{}
+	ret := []Signer{}
 	for _, fi := range files {
 		base := fi.Name()
 		if !strings.HasSuffix(base, ".pem") || fi.IsDir() {
@@ -76,7 +90,7 @@ func (sm *SignerManager) GetSigners() []signer {
 		}
 
 		for _, cert := range certs {
-			ret = append(ret, signer{path, cert, pemBytes})
+			ret = append(ret, Signer{path, cert, pemBytes})
 		}
 	}
 
@@ -86,6 +100,10 @@ func (sm *SignerManager) GetSigners() []signer {
 	return ret
 }
 
+// AddSigner grants access to Warden from the indicated certificate, by adding that certificate to
+// the signers directory specified in JSON config. Returns a non-nil error if the PEM data is
+// invalid or not a single certificate, if the certificate is already authorized (i.e. already
+// present), or on I/O error.
 func (sm *SignerManager) AddSigner(pemBytes []byte) error {
 	block, _ := pem.Decode(pemBytes) // only parse first block in file
 	certs, err := x509.ParseCertificates(block.Bytes)
@@ -95,7 +113,7 @@ func (sm *SignerManager) AddSigner(pemBytes []byte) error {
 	if len(certs) > 1 {
 		return errors.New("multiple certs provided")
 	}
-	s := signer{cert: certs[0]}
+	s := Signer{cert: certs[0]}
 
 	existing := sm.GetSigners()
 	for _, e := range existing {
@@ -118,6 +136,10 @@ func (sm *SignerManager) AddSigner(pemBytes []byte) error {
 	return nil
 }
 
+// DeleteSigner revokes access to Warden from the indicated certificate, by removing that
+// certificate from the signers directory specified in JSON config. Returns a non-nil error if the
+// PEM data is invalid or not a single certificate, if the certificate is not currently
+// authorized, or on an I/O error.
 func (sm *SignerManager) DeleteSigner(pemBytes []byte) error {
 	block, _ := pem.Decode(pemBytes) // only parse first block in file
 	certs, err := x509.ParseCertificates(block.Bytes)
@@ -127,9 +149,9 @@ func (sm *SignerManager) DeleteSigner(pemBytes []byte) error {
 	if len(certs) > 1 {
 		return errors.New("multiple certs provided")
 	}
-	client := signer{cert: certs[0]}
+	client := Signer{cert: certs[0]}
 
-	var victim *signer = nil
+	var victim *Signer = nil
 	existing := sm.GetSigners()
 	for _, e := range existing {
 		if sm.Same(client.cert, e.cert) {
@@ -149,6 +171,9 @@ func (sm *SignerManager) DeleteSigner(pemBytes []byte) error {
 	return nil
 }
 
+// VerifyPeerCallback inspects the provided certificate chain and returns a non-nil error if it's
+// not an approved Warden signer. Specifically, it expects a single certificate in rawCerts, which
+// must be identical to one of the certs in the signers directory configured from JSON. */
 func (sm *SignerManager) VerifyPeerCallback(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
 	//
 	// Both client and server are expected to verify each others' specific certs. These are
@@ -178,6 +203,9 @@ func (sm *SignerManager) VerifyPeerCallback(rawCerts [][]byte, verifiedChains []
 	return errors.New("unknown certificate")
 }
 
+// Same returns true of the two certificates are identical, false otherwise. This is not named the
+// standard Go convention of Equal because it is based on inspection of the DER-encoded
+// raw data and not Go language semantics. */
 func (sm *SignerManager) Same(left *x509.Certificate, right *x509.Certificate) bool {
 	leftHash := sha256.Sum256(left.Raw)
 	rightHash := sha256.Sum256(left.Raw)

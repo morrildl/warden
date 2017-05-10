@@ -1,6 +1,6 @@
 {
   "Port": 9000,
-  "Debug": true,
+  "Debug": false,
   "ServerCertFile": "./certs/sample-server.pem",
   "ServerKeyFile": "./certs/sample-server.key",
   "ServerLogFile": "",
