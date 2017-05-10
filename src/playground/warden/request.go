@@ -17,6 +17,7 @@ type SigningRequest struct {
 	CertSubject     string
 	Payload         []byte
 	PayloadSHA256   string
+	Params          map[string]string
 }
 
 func NewSigningRequestFrom(req *http.Request) (*SigningRequest, error) {
@@ -51,5 +52,13 @@ func NewSigningRequestFrom(req *http.Request) (*SigningRequest, error) {
 	potato.Write(payload)
 	hash := hex.EncodeToString(potato.Sum(nil))
 
-	return &SigningRequest{time.Now(), ip, fingerprint, subject, payload, hash}, nil
+	params := make(map[string]string)
+	req.ParseForm()
+	for k, v := range req.Form {
+		if len(v) > 0 {
+			params[k] = v[0]
+		}
+	}
+
+	return &SigningRequest{time.Now(), ip, fingerprint, subject, payload, hash, params}, nil
 }

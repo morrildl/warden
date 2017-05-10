@@ -49,19 +49,68 @@
             }
           ]
         }
+      },
+
+      "sailfish-dev-releasekey": {
+        "AuthorizedKeys": [],
+        "Config": {
+          "SigningCerts": [
+            { "CertPath": "./certs/imagetest.crt",
+              "KeyPath": "./certs/imagetest.key",
+              "Type": "RSA",
+              "Hash": "SHA256"
+            }
+          ]
+        }
+      },
+      "sailfish-dev-media": {
+        "AuthorizedKeys": [],
+        "Config": {
+          "SigningCerts": [
+            { "CertPath": "./certs/imagetest.crt",
+              "KeyPath": "./certs/imagetest.key",
+              "Type": "RSA",
+              "Hash": "SHA256"
+            }
+          ]
+        }
+      },
+      "sailfish-dev-shared": {
+        "AuthorizedKeys": [],
+        "Config": {
+          "SigningCerts": [
+            { "CertPath": "./certs/imagetest.crt",
+              "KeyPath": "./certs/imagetest.key",
+              "Type": "RSA",
+              "Hash": "SHA256"
+            }
+          ]
+        }
+      },
+      "sailfish-dev-platform": {
+        "AuthorizedKeys": [],
+        "Config": {
+          "SigningCerts": [
+            { "CertPath": "./certs/imagetest.crt",
+              "KeyPath": "./certs/imagetest.key",
+              "Type": "RSA",
+              "Hash": "SHA256"
+            }
+          ]
+        }
       }
+
     },
     "android_boot": {
       "sailfish-dev-boot": {
         "AuthorizedKeys": [],
         "Config": {
           "SigningCert": {
-            "CertPath": "./certs/sample-debug.crt",
-            "KeyPath": "./certs/sample-debug.key",
+            "CertPath": "./certs/imagetest.crt",
+            "KeyPath": "./certs/imagetest.key",
             "Type": "RSA",
             "Hash": "SHA256"
-          },
-          "Target": "/boot"
+          }
         }
       },
       "sailfish-prod-boot": {
@@ -82,7 +131,7 @@
         "AuthorizedKeys": [],
         "Config": {
           "SigningKey": {
-            "KeyPath": "./certs/sample-debug.key",
+            "KeyPath": "./certs/imagetest.key",
             "Type": "RSA",
             "Hash": "SHA256"
           }
@@ -104,7 +153,7 @@
         "AuthorizedKeys": [],
         "Config": {
           "SigningKey": {
-            "KeyPath": "./certs/sample-debug.key",
+            "KeyPath": "./certs/imagetest.key",
             "Type": "RSA",
             "Hash": "SHA256"
           }

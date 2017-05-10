@@ -9,7 +9,6 @@ import (
 
 type AndroidBootConfig struct {
 	SigningCert *android.SigningCert
-	Target string
 }
 
 func AndroidBootSignFunc(config interface{}, req *warden.SigningRequest) (code int, ctype string, response []byte) {
@@ -26,9 +25,15 @@ func AndroidBootSignFunc(config interface{}, req *warden.SigningRequest) (code i
 	var err error
 	var img *otasign.BootImage
 
-	if cfg.Target == "" {
-		log.Warn("signfuncs.AndroidBootSignFunc", "boot image target must be provided")
-		return 400, "text/plain", []byte("boot image target must be provided")
+	target, ok := req.Params["target"]
+	if !ok {
+		log.Warn("signfuncs.AndroidBootSignFunc", "boot image target must be provided by client")
+		return 400, "text/plain", []byte("boot image target must be provided by client")
+	}
+	if len(target) > 30 {
+		// these are boot partition mount points, so should be reasonably short; really long ones smell like an attack
+		log.Warn("signfuncs.AndroidBootSignFunc", "boot image target from client is suspiciously long")
+		return 400, "text/plain", []byte("boot image target from client is suspiciously long")
 	}
 
 	if img, err = otasign.NewBootImage(req.Payload); err != nil {
@@ -36,7 +41,7 @@ func AndroidBootSignFunc(config interface{}, req *warden.SigningRequest) (code i
 		return 400, "text/plain", []byte("error parsing boot image payload: " + err.Error())
 	}
 
-	if err = img.Sign(cfg.Target, cfg.SigningCert); err != nil {
+	if err = img.Sign(target, cfg.SigningCert); err != nil {
 		log.Warn("signfuncs.AndroidBootSignFunc", "error signing boot image", err)
 		return 400, "text/plain", []byte("error signing boot image: " + err.Error())
 	}

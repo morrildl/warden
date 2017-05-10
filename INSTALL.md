@@ -15,10 +15,9 @@ well.
 Building Warden requires a [Go 1.8 installation](https://golang.org/doc/install). Note that most
 Linux distributions are not yet shipping Go 1.8, so you may have to build from source.
 
-    GOPATH=`pwd` CGO_ENABLED=0 go build -a -installsuffix cgo src/main/default.go
-    mv default warden
+    GOPATH=`pwd` CGO_ENABLED=0 go build -a -installsuffix cgo src/main/warden.go
 
-The above command builds a statically-linked binary, that should run on any Linux kernel.
+The above command builds a statically-linked binary that should run on any modern Linux kernel.
 
 ## Run Binary
 

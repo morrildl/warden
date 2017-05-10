@@ -11,6 +11,7 @@ request signatures for binaries.
 This provides the following advantages:
 
 * If your build server is hacked, it doesn't expose the private key you use to sign binaries
+* Allows you to move private key handling to a machine you can more easily security-harden
 * You have logs of what binaries got signed when, by which user, for auditing and forensic purposes
 * You can revoke authorization to sign binaries by simply removing the cert from the whitelist
 * Allows you to easily store private keys offline: for instance put them on a thumb drive which is
@@ -20,9 +21,10 @@ Additionally, though this is not currently supported, it paves the way for stori
 protected hardware (HSM), such as a crypto smartcard. This would require driver support for
 particular hardware, though.
 
-Warden is pretty low overhead -- you could even install it on a Raspberry Pi.
+Warden is pretty low overhead -- you could even install it on a Raspberry Pi. It is also designed to
+have minimal dependencies, so that it doesn't have a large security footprint.
 
-# Usage
+# Purpose & Deployment
 
 Different hardware requires different signing schemes -- signing an image for secure boot on an
 STM32 microcontroller is very different from signing an Android .APK application file, for example.
@@ -80,8 +82,8 @@ to have more granular control can configure Warden to restrict specific endpoint
 For instance, you could allow any whitelisted client to sign binaries with a debug/test key, while
 signing with a release key is restricted to specific clients. In this way, your build server could
 be configured with 2 client access certificates: one without a local password that can thus be used
-for routine signatures (such as for continuous builds), and another with a password-protected
-certificate whose password is known only to a small number of individuals.
+for routine signatures (such as for continuous builds), and another for release signatures with a
+password-protected certificate whose password is known only to a small number of individuals.
 
 ### Compatible Certificates
 
@@ -89,18 +91,25 @@ You can generate suitable client certificates using `openssl`:
 
     openssl genrsa -out new.key 2048 # generate a 2048-bit RSA private key
     openssl req -new -key new.key -out new.csr -days 3650 # generate a certificate signing request
-    openssl x509 -in new.csr -out new.pem -req -signkey center.key -days 3650 # self-sign the cert
+    openssl x509 -in new.csr -out new.pem -req -signkey new.key -days 3650 # self-sign the cert
     rm new.csr # certificate signing request not needed once cert is generated
+
+In addition to the above, some clients (notably, Java) require a PKCS#8 representation rather than
+the PKCS#1 representation `openssl` uses by default. You can convert a key as generated above to
+PKCS#8:
+
+    openssl pkcs8 -topk8 -in new.key -out new.pk8 -outform PEM -nocrypt
 
 You can naturally use RSA key sizes greater than 2048, or any other compatible key -- e.g. you could
 use an elliptic curve algorithm. Anything that works with TLS is fine.
 
 Note that Warden intentionally does not use a certificate authority here. Warden authorizes *a
-specific private key* to have access; it does not implement any PKI chain of trust. The reason is
-that using a CA cert means that if that CA private key is compromised, it can be used to generate
-any number of other certs that will be trusted by the server. Since Warden is intended only for
-point-to-point access from specific machines, it doesn't benefit from the tradeoff that PKI makes
-that increases risk for improved convenience.
+specific private key* to have access; it does not implement any PKI chain of trust. (i.e. Warden
+uses certificate pinning in both directions.) The reason is that using a CA cert means that if that
+CA private key is compromised, it can be used to generate any number of other certs that will be
+trusted by the server. Since Warden is intended only for point-to-point access from specific
+machines, it doesn't benefit from the tradeoff that PKI makes that increases risk for improved
+convenience.
 
 ### Whitelisting Clients
 
@@ -197,8 +206,8 @@ You configure Warden with a JSON file. Currently the format is pretty simple: th
 that configure operation of the server, and then a `"Handlers"` block to set up instances of signing
 schemes.
 
-Here is the sample configuration file from the source tree, which corresponds to the server entry
-hook code in `src/main/default.go`:
+Here is a sample configuration file from the source tree, which corresponds to the server entry
+hook code in `src/main/warden.go`:
 
     {
       "Port": 9000,
@@ -209,22 +218,6 @@ hook code in `src/main/default.go`:
       "SignersDir": "./signers",
 
       "Handlers": {
-        "demo": {
-          "Dummy": {
-            "AuthorizedKeys": ["2A:1D:2F:76:A6:36:FE:88:3D:75:14:3B:A5:3C:04:3B:12:FF:91:3D:87:46:AE:9A:6B:23:13:B5:FF:07:08:36"],
-            "Config": {
-              "Hello": "hello i am Dumy",
-              "Invert": false
-            }
-          },
-          "AnotherDummy": {
-            "AuthorizedKeys": [],
-            "Config": {
-              "Hello": "i am also Dmmy to",
-              "Invert": true
-            }
-          }
-        },
         "stm32": {
           "STM32": {
             "AuthorizedKeys": [],
@@ -244,7 +237,7 @@ hook code in `src/main/default.go`:
           }
         },
         "apk": {
-          "apk-debug": {
+          "someapp-debug": {
             "AuthorizedKeys": [],
             "Config": {
               "SigningKeys": [
@@ -256,8 +249,8 @@ hook code in `src/main/default.go`:
               ]
             }
           },
-          "apk-release": {
-            "AuthorizedKeys": [],
+          "someapp-release": {
+            "AuthorizedKeys": ['00:11:22:33:44:55:66:77:88:00:aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:00:aa:bb:cc:dd:ee:ff'],
             "Config": {
               "SigningKeys": [
                 { "CertPath": "./certs/sample-release.crt",
@@ -284,20 +277,19 @@ First, the general server configuration parameters:
 The `"Handlers"` block configures instances of signing scheme endpoints. In the example above, there
 are 6 such endpoints configured:
 
-* `/sign/Dummy` -- uses the sample/dummy no-op signing scheme included with Warden
-* `/sign/AnotherDummy` -- a second instance of the same scheme, with different config values
-* `/sign/MyCustomSetup` -- another no-op example included in `src/main/default.go` as an example of custom schemes
+* `/sign/MyCustomSetup` -- a no-op signer included in `src/main/warden.go` as an example of custom schemes
 * `/sign/STM32` -- an instance of the (real, working) STM32 microcontroller image signing scheme
-* `/sign/apk-debug` & `/sign/apk-release` -- two (real, working) endpoints for signing Android APKs using different keys
+* `/sign/someapp-debug` & `/sign/someapp-release` -- two (real, working) endpoints for signing Android APKs using different keys
 
-The `Dummy` endpoint is configured to restrict signing to a particular certificate, via the
-`AuthorizedKeys` field; the others have no such restriction.
+The `someapp-release` endpoint is configured to restrict signing to a particular certificate, via the
+`AuthorizedKeys` field; the others have no such restriction, and any client certificate allowed to
+connect at all can sign binaries using those keys.
 
 Note the hierarchy: the two Android configurations are under a `"apk"` entry in the `"Handlers"`
-object. Similarly, the two dummy configurations are under a `"demo"` entry. This top-level entry
-specifies the specific `SignFunc` to use: the implementations in the code register themselves under
-these names. That is, `"apk"` refers to the `SignFunc` in `src/playground/warden/signfuncs/APK.go`,
-while `"demo"` refers to `src/playground/warden/signfuncs/dummy.go`, and so on.
+object. This top-level entry specifies the specific `SignFunc` to use: the implementations in the
+code register themselves under these names. That is, `"apk"` refers to the `SignFunc` in
+`src/playground/warden/signfuncs/APK.go`, while `"demo"` refers to
+`src/playground/warden/signfuncs/dummy.go`, and so on.
 
 Within each named block are additional configuration fields. These fields vary by signing scheme,
 but in general you can expect each scheme to require at least the path to a private key file -- for
@@ -316,10 +308,10 @@ will simply be dormant code in the binary.
 
 # Building and Customizing Warden
 
-The configuration instructions above assume that you are using the standard Warden binary,
-configuring endpoints only from the library of included signing schemes. However, Warden was
-designed to be easy to extend by adding your own signing schemes and building a custom Warden
-binary.
+The configuration instructions above assume that you are using the standard Warden binary compiled
+from `src/main/warden.go`, configuring endpoints only from the library of included signing schemes.
+However, Warden was designed to be easy to extend by adding your own signing schemes and building a
+custom Warden binary.
 
 ## Writing Custom Signing Schemes
 
@@ -333,18 +325,17 @@ Go core libraries.
 
 This does, however, mean you will also need to provide a customized top-level `main()` function that
 registers your callback. For an example (which is also the default configuration), see
-`src/main/default.go`. Your custom signing scheme code can simply go in this same file; again see
-`default.go` for an example.
+`src/main/warden.go`. Your custom signing scheme code can simply go in this same file; again see
+`warden.go` for an example.
 
 Once you have written your signing scheme code and registed it via callback, you must build the
 code. You do this using the standard Go toolchain. For instance, this command will produce a
-statically-linked binary from the `src/main/default.go` in the Warden tree:
+statically-linked binary from the `src/main/warden.go` in the Warden tree:
 
-    GOPATH=`pwd` CGO_ENABLED=0 go build -a -installsuffix cgo src/main/default.go
+    GOPATH=`pwd` CGO_ENABLED=0 go build -a -installsuffix cgo src/main/warden.go
 
-You can then rename the binary and run it with a configuration file:
+You can then run the binary with a configuration file:
 
-    mv default warden
     ./warden -config etc/warden.json
 
 # Recipes
@@ -403,7 +394,7 @@ this:
 You would use this recipe if you want to generate fresh Android app signing keys, such as for a
 production release build.
 
-## Production Android APK Signing Config
+## Production Android Signing Config
 
 A typical configuration file set up to sign binaries for a single Android device will look something
 like this:
@@ -418,79 +409,233 @@ like this:
 
       "Handlers": {
         "apk": {
-          "test": {
-            "AuthorizedKeys": [],
-            "Config": {
-              "SigningKeys": [
-                { "CertPath": "/opt/private/signing-keys/test.crt",
-                  "KeyPath": "/opt/private/signing-keys/test.key",
-                  "Type": "RSA",
-                  "Hash": "SHA256"
-                }
-              ]
-            }
-          },
-          "system-media": {
-            "AuthorizedKeys": [],
-            "Config": {
-              "SigningKeys": [
-                { "CertPath": "/opt/private/signing-keys/media.crt",
-                  "KeyPath": "/opt/private/signing-keys/media.key",
-                  "Type": "RSA",
-                  "Hash": "SHA256"
-                }
-              ]
-            }
-          },
-          "system-platform": {
-            "AuthorizedKeys": [],
-            "Config": {
-              "SigningKeys": [
-                { "CertPath": "/opt/private/signing-keys/platform.crt",
-                  "KeyPath": "/opt/private/signing-keys/platform.key",
-                  "Type": "RSA",
-                  "Hash": "SHA256"
-                }
-              ]
-            }
-          },
-          "system-shared": {
-            "AuthorizedKeys": [],
-            "Config": {
-              "SigningKeys": [
-                { "CertPath": "/opt/private/signing-keys/shared.crt",
-                  "KeyPath": "/opt/private/signing-keys/shared.key",
-                  "Type": "RSA",
-                  "Hash": "SHA256"
-                }
-              ]
-            }
-          },
           "playstore-app": {
+            "AuthorizedKeys": ["99887766554433221100ffeedccbbaa99887766554433221100ffeedccbbaa"],
+            "Config": {
+              "SigningKeys": [
+                { "CertPath": "/opt/private/signing-keys/playstore-app/prod.crt",
+                  "KeyPath": "/opt/private/signing-keys/playstore-app/prod.key",
+                  "Type": "RSA",
+                  "Hash": "SHA256"
+                }
+              ]
+            }
+          },
+
+          "model-dev-media": {
             "AuthorizedKeys": [],
             "Config": {
               "SigningKeys": [
-                { "CertPath": "/opt/private/signing-keys/playstore.crt",
-                  "KeyPath": "/opt/private/signing-keys/playstore.key",
+                { "CertPath": "/opt/private/signing-keys/model/media-dev.crt",
+                  "KeyPath": "/opt/private/signing-keys/model/media-dev.key",
+                  "Type": "RSA",
+                  "Hash": "SHA256"
+                }
+              ]
+            }
+          },
+          "model-prod-media": {
+            "AuthorizedKeys": ["00:11:22:33:44:55:66:77:88:99:00:aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99:00:aa:bb:cc:dd:ee:ff"],
+            "Config": {
+              "SigningKeys": [
+                { "CertPath": "/opt/private/signing-keys/model/media-prod.crt",
+                  "KeyPath": "/opt/private/signing-keys/model/media-prod.key",
+                  "Type": "RSA",
+                  "Hash": "SHA256"
+                }
+              ]
+            }
+          },
+
+
+          "model-dev-platform": {
+            "AuthorizedKeys": [],
+            "Config": {
+              "SigningKeys": [
+                { "CertPath": "/opt/private/signing-keys/model/platform-dev.crt",
+                  "KeyPath": "/opt/private/signing-keys/model/platform-dev.key",
+                  "Type": "RSA",
+                  "Hash": "SHA256"
+                }
+              ]
+            }
+          },
+          "model-prod-platform": {
+            "AuthorizedKeys": ["00:11:22:33:44:55:66:77:88:99:00:aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99:00:aa:bb:cc:dd:ee:ff"],
+            "Config": {
+              "SigningKeys": [
+                { "CertPath": "/opt/private/signing-keys/model/platform-prod.crt",
+                  "KeyPath": "/opt/private/signing-keys/model/platform-prod.key",
+                  "Type": "RSA",
+                  "Hash": "SHA256"
+                }
+              ]
+            }
+          },
+
+
+          "model-dev-shared": {
+            "AuthorizedKeys": [],
+            "Config": {
+              "SigningKeys": [
+                { "CertPath": "/opt/private/signing-keys/model/shared-dev.crt",
+                  "KeyPath": "/opt/private/signing-keys/model/shared-dev.key",
+                  "Type": "RSA",
+                  "Hash": "SHA256"
+                }
+              ]
+            }
+          },
+          "model-prod-shared": {
+            "AuthorizedKeys": ["00:11:22:33:44:55:66:77:88:99:00:aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99:00:aa:bb:cc:dd:ee:ff"],
+            "Config": {
+              "SigningKeys": [
+                { "CertPath": "/opt/private/signing-keys/model/shared-prod.crt",
+                  "KeyPath": "/opt/private/signing-keys/model/shared-prod.key",
+                  "Type": "RSA",
+                  "Hash": "SHA256"
+                }
+              ]
+            }
+          },
+
+
+          "model-dev-releasekey": {
+            "AuthorizedKeys": [],
+            "Config": {
+              "SigningKeys": [
+                { "CertPath": "/opt/private/signing-keys/model/releasekey-dev.crt",
+                  "KeyPath": "/opt/private/signing-keys/model/releasekey-dev.key",
+                  "Type": "RSA",
+                  "Hash": "SHA256"
+                }
+              ]
+            }
+          },
+          "model-prod-releasekey": {
+            "AuthorizedKeys": ["00:11:22:33:44:55:66:77:88:99:00:aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99:00:aa:bb:cc:dd:ee:ff"],
+            "Config": {
+              "SigningKeys": [
+                { "CertPath": "/opt/private/signing-keys/model/releasekey-prod.crt",
+                  "KeyPath": "/opt/private/signing-keys/model/releasekey-prod.key",
                   "Type": "RSA",
                   "Hash": "SHA256"
                 }
               ]
             }
           }
+        },
+
+        "android_boot": {
+          "model-dev-boot": {
+            "AuthorizedKeys": [],
+            "Config": {
+              "SigningCert": {
+                "CertPath": "/opt/private/signing-keys/model/releasekey-dev.crt",
+                "KeyPath": "/opt/private/signing-keys/model/releasekey-dev.key",
+                "Type": "RSA",
+                "Hash": "SHA256"
+              }
+            }
+          },
+          "model-prod-boot": {
+            "AuthorizedKeys": ["00:11:22:33:44:55:66:77:88:99:00:aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99:00:aa:bb:cc:dd:ee:ff"],
+            "Config": {
+              "SigningCert": {
+                "CertPath": "/opt/private/signing-keys/model/releasekey-prod.crt",
+                "KeyPath": "/opt/private/signing-keys/model/releasekey-prod.key",
+                "Type": "RSA",
+                "Hash": "SHA256"
+              }
+            }
+          },
+        },
+
+        "android_verity": {
+          "model-dev-verity": {
+            "AuthorizedKeys": [],
+            "Config": {
+              "SigningKey": {
+                "KeyPath": "/opt/private/signing-keys/model/releasekey-dev.key",
+                "Type": "RSA",
+                "Hash": "SHA256"
+              }
+            }
+          },
+          "model-prod-verity": {
+            "AuthorizedKeys": ["00:11:22:33:44:55:66:77:88:99:00:aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99:00:aa:bb:cc:dd:ee:ff"],
+            "Config": {
+              "SigningKey": {
+                "KeyPath": "/opt/private/signing-keys/model/releasekey-prod.key",
+                "Type": "RSA",
+                "Hash": "SHA256"
+              }
+            }
+          }
+        },
+
+        "android_payload": {
+          "model-dev-payload": {
+            "AuthorizedKeys": [],
+            "Config": {
+              "SigningKey": {
+                "KeyPath": "/opt/private/signing-keys/model/releasekey-prod.key",
+                "Type": "RSA",
+                "Hash": "SHA256"
+              }
+            }
+          },
+          "model-prod-payload": {
+            "AuthorizedKeys": ["00:11:22:33:44:55:66:77:88:99:00:aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99:00:aa:bb:cc:dd:ee:ff"],
+            "Config": {
+              "SigningKey": {
+                "KeyPath": "/opt/private/signing-keys/model/releasekey-prod.key",
+                "Type": "RSA",
+                "Hash": "SHA256"
+              }
+            }
+          }
         }
       }
     }
 
-An Android system image uses multiple certs and keys to sign the APKs within the image. These
-include a "test-keys" key used for debug builds (e.g. for continuous integration builds), and then 3
-different keys for different classes of system APKs (media, platform, and shared.) Typically you use
-different sets of these 4 keys for each device, although the example above only has a single set.
-You can easily expand the list with more signing keys, however, to support multiple devices.
+Typically a given device has a dogfood period, where you push a build out via the usual OTA
+infrastructure to the team working on it, or possibly all company employees. If such a build leaks,
+it could contain bugs that would put production users at risk. The common practice, therefore, is to
+sign such dogfood builds as if they were production builds, but using a different key. In this way,
+the device-side OTA code will not be able to install a "dev" build over top a "prod" build. In the
+example above, you will see these pairs of "-dev-" and "-prod-" configurations throughout the file.
 
-The example also has an additional entry, "playstore-app". This would be for an APK that you upload
-to Google Play Store, that you don't necessarily preload (although you could also preload it.) Such
-APKs should not reuse any of the system keys. An example here would be a UI app controlling a companion
-gadget you also produce, a data migration app, and so on. These are distinct from the core system
-apps, such as the low-level media player, and so on.
+By the same token, because prod builds are more sensitive, you typically want to restrict access to
+sign those. Accordingly, all of the "-prod-" config entries in the example above specify an
+`AuthorizedKeys` whitelist. This further restricts the ability to sign using that key to that
+specific client, which could -- for example -- be installed on your build server but encrypted with a
+passphrase known only to your release engineering team. Your continuous build server or other UI
+would prompt for this passphrase prior to an attempt to sign; without it, the client certificate
+cannot be used to connect to Warden, and thus binaries cannot be signed. Meanwhile the "-dev-"
+configuration has no such ACL restriction, allowing a second certificate on the build server to
+connect to Warden automatically, and thus sign any build with the less-sensitive "dev" key.
 
+A close reading of the example above will reveal that there are only 4 distinct pairs of keys
+referenced, despite there being 7 pairs of entries. The reason is that one key is used for all of
+"releasekey" APKs, boot partition images, verity (non-boot) partitions, and A/B OTA payload
+signatures. This represents a fairly typical convention on Android devices. It is, however,
+certainly possible to use different keys for all 7 uses, although it's likely overkill to use a
+separate key for A/B payload signing, verity, and boot (though it may make sense to use a separate
+key for "releasekeys" APKs, for a total of 5 keys.)
+
+There are 4 different keys for signing APK files because an Android system image uses multiple keys
+as part of its runtime security model for privilege separation. There are 4
+such standard keys, referred to by the Android build as "media", "shared", "platform", and
+"releasekey" (the default for APKs which don't specify any other.) Accordingly, there are 4 pairs of
+entries in the "apk" section. These sets of keys are used to group APKs (apps) with similar
+privileges together, for example to prevent security issues in the media player from compromising
+the critical framework processes.
+
+Finally, note that the example also has an additional entry, "playstore-app". This would be for an
+APK that you upload to Google Play Store, that you don't necessarily preload (although you could
+also preload it.) Such APKs should not reuse any of the system keys. An example here would be a UI
+app controlling a home automation gadget you also produce, a data migration app, and so on. These
+are distinct from the core system apps, such as the low-level media player, SystemUI, phone dialer,
+and so on. If you desire a dev/prod split for such an app similar to the one for system images, this
+is easy to set up, although not depicted above.
