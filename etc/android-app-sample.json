@@ -1,0 +1,37 @@
+{
+  "Port": 9000,
+  "Debug": false,
+  "ServerCertFile": "./certs/sample-server.pem",
+  "ServerKeyFile": "./certs/sample-server.key",
+  "ServerLogFile": "",
+  "SignersDir": "./signers",
+
+  "Handlers": {
+    "apk": {
+      "MyApp-debug": {
+        "AuthorizedKeys": [],
+        "Config": {
+          "SigningCerts": [
+            { "CertPath": "./certs/myapp-debug.crt",
+              "KeyPath": "./certs/myapp-debug.key",
+              "Type": "RSA",
+              "Hash": "SHA256"
+            }
+          ]
+        }
+      },
+      "MyApp-release": {
+        "AuthorizedKeys": [],
+        "Config": {
+          "SigningCerts": [
+            { "CertPath": "./certs/myapp-release.crt",
+              "KeyPath": "./certs/myapp-release.key",
+              "Type": "RSA",
+              "Hash": "SHA256"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

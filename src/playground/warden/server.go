@@ -216,6 +216,7 @@ func ListenAndServe() error {
 
 		chunks := strings.Split(req.URL.Path, "/")
 		if len(chunks) != 3 {
+			log.Warn("main/sign/", "bogus URL '" + req.URL.Path + "'")
 			httputil.SendJSON(writer, http.StatusBadRequest, struct{}{})
 			return
 		}
@@ -223,9 +224,12 @@ func ListenAndServe() error {
 		name := chunks[2]
 		handler, ok := signHandlers[name]
 		if !ok {
+			log.Warn("main/sign/", "unknown signer '" + name + "'")
 			httputil.SendJSON(writer, http.StatusNotFound, struct{}{})
 			return
 		}
+
+		log.Debug("main/sign/", "located handler for '" + name + "'")
 
 		sreq, err := NewSigningRequestFrom(req)
 		if err != nil {
@@ -254,6 +258,11 @@ func ListenAndServe() error {
 		}
 
 		httputil.Send(writer, resCode, contentType, body)
+	})
+
+	http.HandleFunc("/", func(writer http.ResponseWriter, req *http.Request) {
+		log.Warn("main/", "attempted access to unknown URL '" + req.URL.Path + "'")
+		httputil.SendJSON(writer, http.StatusNotFound, struct{}{})
 	})
 
 	// now make an HTTPS server using the self-signed-ready tls.Config

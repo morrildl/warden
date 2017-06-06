@@ -1,0 +1,29 @@
+{
+  "Port": 9000,
+  "Debug": true,
+  "ServerCertFile": "./certs/sample-server.pem",
+  "ServerKeyFile": "./certs/sample-server.key",
+  "ServerLogFile": "",
+  "SignersDir": "./signers",
+
+  "Handlers": {
+    "custom": {
+      "MyCustomSetup": {
+        "AuthorizedCerts": [],
+        "Config": {
+          "KeyPath": "/path/to/nowhere",
+          "SomeSetting": 42
+        }
+      }
+    },
+    "stm32": {
+      "STM32": {
+        "AuthorizedKeys": [],
+        "Config": {
+          "PrivateKeyPath": "./certs/sample-rsa.pem",
+          "MaxFileSize": 491520
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,113 @@
+{
+  "Port": 9000,
+  "Debug": true,
+  "ServerCertFile": "./certs/sample-server.pem",
+  "ServerKeyFile": "./certs/sample-server.key",
+  "ServerLogFile": "",
+  "SignersDir": "./signers",
+
+  "Handlers": {
+    "apk": {
+      "sailfish-dev-releasekey": {
+        "AuthorizedKeys": [],
+        "Config": {
+          "SigningCerts": [
+            { "CertPath": "/home/morrildl/certs/releasekey.x509.pem",
+              "KeyPath": "/home/morrildl/certs/private/releasekey.key",
+              "Type": "RSA",
+              "Hash": "SHA256"
+            }
+          ]
+        }
+      },
+      "sailfish-dev-default": {
+        "AuthorizedKeys": [],
+        "Config": {
+          "SigningCerts": [
+            { "CertPath": "/home/morrildl/certs/default.x509.pem",
+              "KeyPath": "/home/morrildl/certs/private/default.key",
+              "Type": "RSA",
+              "Hash": "SHA256"
+            }
+          ]
+        }
+      },
+      "sailfish-dev-media": {
+        "AuthorizedKeys": [],
+        "Config": {
+          "SigningCerts": [
+            { "CertPath": "/home/morrildl/certs/media.x509.pem",
+              "KeyPath": "/home/morrildl/certs/private/media.key",
+              "Type": "RSA",
+              "Hash": "SHA256"
+            }
+          ]
+        }
+      },
+      "sailfish-dev-shared": {
+        "AuthorizedKeys": [],
+        "Config": {
+          "SigningCerts": [
+            { "CertPath": "/home/morrildl/certs/shared.x509.pem",
+              "KeyPath": "/home/morrildl/certs/private/shared.key",
+              "Type": "RSA",
+              "Hash": "SHA256"
+            }
+          ]
+        }
+      },
+      "sailfish-dev-platform": {
+        "AuthorizedKeys": [],
+        "Config": {
+          "SigningCerts": [
+            { "CertPath": "/home/morrildl/certs/platform.x509.pem",
+              "KeyPath": "/home/morrildl/certs/private/platform.key",
+              "Type": "RSA",
+              "Hash": "SHA256"
+            }
+          ]
+        }
+      }
+    },
+
+    "android_boot": {
+      "sailfish-dev-boot": {
+        "AuthorizedKeys": [],
+        "Config": {
+          "SigningCert": {
+            "CertPath": "/home/morrildl/certs/verity.x509.pem",
+            "KeyPath": "/home/morrildl/certs/private/verity.key",
+            "Type": "RSA",
+            "Hash": "SHA256"
+          }
+        }
+      }
+    },
+
+    "android_verity": {
+      "sailfish-dev-verity": {
+        "AuthorizedKeys": [],
+        "Config": {
+          "SigningKey": {
+            "KeyPath": "/home/morrildl/certs/private/verity.key",
+            "Type": "RSA",
+            "Hash": "SHA256"
+          }
+        }
+      }
+    },
+
+    "android_payload": {
+      "sailfish-dev-payload": {
+        "AuthorizedKeys": [],
+        "Config": {
+          "SigningKey": {
+            "KeyPath": "/home/morrildl/certs/private/releasekey.key",
+            "Type": "RSA",
+            "Hash": "SHA256"
+          }
+        }
+      }
+    }
+  }
+}
