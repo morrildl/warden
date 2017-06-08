@@ -12,8 +12,8 @@
         "AuthorizedKeys": [],
         "Config": {
           "SigningCerts": [
-            { "CertPath": "/home/morrildl/certs/releasekey.x509.pem",
-              "KeyPath": "/home/morrildl/certs/private/releasekey.key",
+            { "CertPath": "./certs/releasekey.x509.pem",
+              "KeyPath": "./certs/private/releasekey.key",
               "Type": "RSA",
               "Hash": "SHA256"
             }
@@ -24,8 +24,8 @@
         "AuthorizedKeys": [],
         "Config": {
           "SigningCerts": [
-            { "CertPath": "/home/morrildl/certs/default.x509.pem",
-              "KeyPath": "/home/morrildl/certs/private/default.key",
+            { "CertPath": "./certs/default.x509.pem",
+              "KeyPath": "./certs/private/default.key",
               "Type": "RSA",
               "Hash": "SHA256"
             }
@@ -36,8 +36,8 @@
         "AuthorizedKeys": [],
         "Config": {
           "SigningCerts": [
-            { "CertPath": "/home/morrildl/certs/media.x509.pem",
-              "KeyPath": "/home/morrildl/certs/private/media.key",
+            { "CertPath": "./certs/media.x509.pem",
+              "KeyPath": "./certs/private/media.key",
               "Type": "RSA",
               "Hash": "SHA256"
             }
@@ -48,8 +48,8 @@
         "AuthorizedKeys": [],
         "Config": {
           "SigningCerts": [
-            { "CertPath": "/home/morrildl/certs/shared.x509.pem",
-              "KeyPath": "/home/morrildl/certs/private/shared.key",
+            { "CertPath": "./certs/shared.x509.pem",
+              "KeyPath": "./certs/private/shared.key",
               "Type": "RSA",
               "Hash": "SHA256"
             }
@@ -60,8 +60,8 @@
         "AuthorizedKeys": [],
         "Config": {
           "SigningCerts": [
-            { "CertPath": "/home/morrildl/certs/platform.x509.pem",
-              "KeyPath": "/home/morrildl/certs/private/platform.key",
+            { "CertPath": "./certs/platform.x509.pem",
+              "KeyPath": "./certs/private/platform.key",
               "Type": "RSA",
               "Hash": "SHA256"
             }
@@ -75,8 +75,8 @@
         "AuthorizedKeys": [],
         "Config": {
           "SigningCert": {
-            "CertPath": "/home/morrildl/certs/verity.x509.pem",
-            "KeyPath": "/home/morrildl/certs/private/verity.key",
+            "CertPath": "./certs/verity.x509.pem",
+            "KeyPath": "./certs/private/verity.key",
             "Type": "RSA",
             "Hash": "SHA256"
           }
@@ -89,7 +89,7 @@
         "AuthorizedKeys": [],
         "Config": {
           "SigningKey": {
-            "KeyPath": "/home/morrildl/certs/private/verity.key",
+            "KeyPath": "./certs/private/verity.key",
             "Type": "RSA",
             "Hash": "SHA256"
           }
@@ -102,7 +102,7 @@
         "AuthorizedKeys": [],
         "Config": {
           "SigningKey": {
-            "KeyPath": "/home/morrildl/certs/private/releasekey.key",
+            "KeyPath": "./certs/private/releasekey.key",
             "Type": "RSA",
             "Hash": "SHA256"
           }

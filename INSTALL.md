@@ -21,7 +21,7 @@ The above command builds a statically-linked binary that should run on any moder
 
 ## Run Binary
 
-    ./warden -config etc/warden.json
+    ./warden -config etc/simple-sample.json
 
 ## Optional: Run APK Signing Unit Tests
 
