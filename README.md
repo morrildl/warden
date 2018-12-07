@@ -1,5 +1,9 @@
 Warden is a key sequestration and binary signing service.
 
+_Note: this code is a bit out of date. It may also be less interesting than the [actual Android build signing code](https://github.com/morrildl/playground-android) or the [client scripts for integrating a remote signing server with the AOSP build scripts](https://github.com/morrildl/playground-androidclients) which do the heavy lifting._
+
+Special thanks to Playground Global, LLC for open-sourcing this software. See `LICENSE` for details.
+
 # Overview
 
 By running Warden on a Linux machine, you can implement robust signing policies for binaries you

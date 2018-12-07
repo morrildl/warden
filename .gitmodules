@@ -1,16 +1,28 @@
 
 [submodule "src/vendor/playground/log"]
 	path = src/vendor/playground/log
-	url = ssh://code.playground.global:29418/studio/playground/log
+        url = https://github.com/morrildl/playground-log
 [submodule "src/vendor/playground/config"]
 	path = src/vendor/playground/config
-	url = ssh://code.playground.global:29418/studio/playground/config
+        url = https://github.com/morrildl/playground-config
 [submodule "src/vendor/playground/httputil"]
 	path = src/vendor/playground/httputil
-	url = ssh://code.playground.global:29418/studio/playground/httputil
+        url = https://github.com/morrildl/playground-httputil
 [submodule "src/vendor/github.com/fullsailor/pkcs7"]
 	path = src/vendor/github.com/fullsailor/pkcs7
 	url = https://github.com/fullsailor/pkcs7
 [submodule "src/vendor/playground/android"]
 	path = src/vendor/playground/android
-	url = ssh://code.playground.global:29418/studio/playground/apksign
+        url = https://github.com/morrildl/playground-android
+[submodule "src/vendor/playground/session"]
+	path = src/vendor/playground/session
+	url = https://github.com/morrildl/playground-session
+[submodule "src/vendor/github.com/dgrijalva/jwt-go"]
+	path = src/vendor/github.com/dgrijalva/jwt-go
+	url = https://github.com/dgrijalva/jwt-go
+[submodule "src/vendor/golang.org/x/oauth2"]
+	path = src/vendor/golang.org/x/oauth2
+	url = https://go.googlesource.com/oauth2
+[submodule "src/vendor/golang.org/x/net"]
+	path = src/vendor/golang.org/x/net
+	url = https://go.googlesource.com/net

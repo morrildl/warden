@@ -7,3 +7,5 @@
 signers/
 /TODO.md
 /default
+pkg
+.vscode

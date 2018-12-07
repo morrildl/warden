@@ -12,7 +12,7 @@ via Warden.
     cat <<EOF >> .repo/local_manifests/warden.xml
     <?xml version="1.0" encoding="UTF-8"?>
     <manifest>
-      <remote  name="warden" fetch="ssh://code.playground.global:29418/"/>
+      <remote  name="warden" fetch="https://github.com/morrildl/playground-androidclients"/>
       <project path="build/warden" name="studio/warden/android-clients" remote="warden" revision="master" />
     </manifest>
     EOF
